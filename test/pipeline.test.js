@@ -6,19 +6,55 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { cleanLeads } from "../src/application/CleanLeads.js";
+import { dedupeAcrossBuscas } from "../src/application/dedupeAcrossBuscas.js";
 import { filterLeads } from "../src/application/FilterLeads.js";
 import { splitLeads } from "../src/application/SplitLeads.js";
 import { enrichLeads } from "../src/application/EnrichLeads.js";
-import { toWhatsAppLink, parseReviews, parseRating } from "../src/domain/Lead.js";
+import { toWhatsAppLink, parseReviews, parseRating, parseAddress } from "../src/domain/Lead.js";
 import { isSocialOrAggregator, classifyCwv } from "../src/domain/classification.js";
 import { detectErrorPage } from "../src/infrastructure/scraper/SiteHealthChecker.js";
-import { extractEmails, decodeCloudflareEmails, isJunkEmail } from "../src/infrastructure/scraper/SiteTextScraper.js";
+import { extractEmails, decodeCloudflareEmails, isJunkEmail, normalizeEmail } from "../src/infrastructure/scraper/SiteTextScraper.js";
 import { findContactLinks, urlVariants } from "../src/infrastructure/scraper/EmailScraper.js";
 
 test("parse de nota e avaliações em PT-BR", () => {
   assert.equal(parseRating("4,7"), 4.7);
   assert.equal(parseReviews("(1.234)"), 1234);
   assert.equal(parseReviews("98 avaliações"), 98);
+});
+
+test("parseAddress: separa endereço pt-BR em componentes", () => {
+  const a = parseAddress("Av. Paulista, 1578 - Bela Vista, São Paulo - SP, 01310-200");
+  assert.equal(a.logradouro, "Av. Paulista");
+  assert.equal(a.numero, "1578");
+  assert.equal(a.bairro, "Bela Vista");
+  assert.equal(a.cidade, "São Paulo");
+  assert.equal(a.estado, "SP");
+  assert.equal(a.cep, "01310-200");
+  assert.equal(a.pais, "Brasil"); // UF brasileira => país inferido
+
+  // Com país explícito e número em segmento próprio.
+  const b = parseAddress("R. Sete, 45, Centro, São Carlos - SP, 13560-000, Brasil");
+  assert.equal(b.numero, "45");
+  assert.equal(b.bairro, "Centro");
+  assert.equal(b.cidade, "São Carlos");
+  assert.equal(b.pais, "Brasil");
+
+  // Endereço vazio => tudo em branco, sem quebrar.
+  assert.equal(parseAddress("").endereco, "");
+  assert.equal(parseAddress("").cidade, "");
+});
+
+test("normalizeEmail: remove %20/espaços e lixo nas pontas", () => {
+  assert.equal(normalizeEmail("%20ziva@gmail.com"), "ziva@gmail.com");
+  assert.equal(normalizeEmail("  Contato@Empresa.com  "), "contato@empresa.com");
+  // E o e-mail "com %20" deduplica com o real ao extrair do HTML.
+  const emails = extractEmails(`<p>%20ziva@gmail.com</p><a href="mailto:ziva@gmail.com">x</a>`);
+  assert.deepEqual(emails, ["ziva@gmail.com"]);
+});
+
+test("extração de e-mails: descarta domínio de template (mysite.com)", () => {
+  assert.ok(isJunkEmail("info@mysite.com"));
+  assert.ok(!isJunkEmail("info@restaurantereal.com.br"));
 });
 
 test("WhatsApp só para celular BR", () => {
@@ -67,6 +103,35 @@ test("limpeza: NÃO descarta leads sem avaliação/contato (só deduplica)", () 
     { nome: "", link_maps: mapsUrl("0x2:0x2") }, // até sem nome é mantido
   ];
   assert.equal(cleanLeads(raw).length, 2);
+});
+
+test("dedupe entre buscas: mesmo lugar em pesquisas diferentes some da 2ª", () => {
+  const buscas = [
+    {
+      query: "dentistas campinas",
+      comSite: [
+        { nome: "Clínica A", site: "https://a.com", link_maps: mapsUrl("0xaaa:0x111") },
+        { nome: "Clínica B", site: "https://b.com", link_maps: mapsUrl("0xbbb:0x222") },
+      ],
+      semSite: [],
+      stats: { comSite: 2, semSite: 0 },
+    },
+    {
+      query: "ortodontistas campinas",
+      comSite: [
+        // Mesmo place-id da Clínica A => duplicata entre buscas.
+        { nome: "Clínica A", site: "https://a.com", link_maps: mapsUrl("0xaaa:0x111") },
+        { nome: "Clínica C", site: "https://c.com", link_maps: mapsUrl("0xccc:0x333") },
+      ],
+      semSite: [],
+      stats: { comSite: 2, semSite: 0 },
+    },
+  ];
+  const { removed } = dedupeAcrossBuscas(buscas);
+  assert.equal(removed, 1);
+  assert.deepEqual(buscas[0].comSite.map((l) => l.nome), ["Clínica A", "Clínica B"]);
+  assert.deepEqual(buscas[1].comSite.map((l) => l.nome), ["Clínica C"]); // A removida
+  assert.equal(buscas[1].stats.comSite, 1); // contador ajustado
 });
 
 test("filtro: leads sem avaliação só entram quando mín = 0", () => {

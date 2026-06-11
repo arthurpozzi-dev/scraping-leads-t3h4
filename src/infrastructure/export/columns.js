@@ -18,12 +18,34 @@ const BASE_COLUMNS = [
   { key: "link_maps", header: "Link Google Maps" },
 ];
 
-/** Lista "sem site": colunas base (sem a coluna de site). */
-export const COLUMNS_SEM_SITE = BASE_COLUMNS;
+/**
+ * Colunas de endereço. O endereço completo vem marcado por padrão; os
+ * componentes separados (país, estado, cidade…) ficam disponíveis, porém
+ * DESMARCADOS por padrão (`default: false`) — quem quiser a planilha "quebrada"
+ * marca no modal de exportação.
+ */
+const ADDRESS_COLUMNS = [
+  { key: "endereco", header: "Endereço" },
+  { key: "pais", header: "País", default: false },
+  { key: "estado", header: "Estado", default: false },
+  { key: "cidade", header: "Cidade", default: false },
+  { key: "bairro", header: "Bairro", default: false },
+  { key: "logradouro", header: "Logradouro", default: false },
+  { key: "numero", header: "Número", default: false },
+  { key: "cep", header: "CEP", default: false },
+];
+
+/** Lista "sem site": colunas base + endereço (após WhatsApp). */
+export const COLUMNS_SEM_SITE = [
+  ...BASE_COLUMNS.slice(0, 6), // nome..WhatsApp
+  ...ADDRESS_COLUMNS,
+  ...BASE_COLUMNS.slice(6), // redes_sociais, descrição, link_maps
+];
 
 /** Lista "com site": inclui Site + relatório detalhado de Core Web Vitals. */
 export const COLUMNS_COM_SITE = [
   ...BASE_COLUMNS.slice(0, 6), // até WhatsApp
+  ...ADDRESS_COLUMNS,
   { key: "site", header: "Site" },
   { key: "redes_sociais", header: "Redes Sociais" },
   // Performance (headline)

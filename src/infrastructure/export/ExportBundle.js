@@ -18,6 +18,28 @@ import { pickColumns } from "./columns.js";
 import { slugify } from "./slug.js";
 import { getReportLocale } from "../../application/reportI18n/index.js";
 
+/**
+ * Expande leads com VÁRIOS e-mails em uma linha por e-mail (duplicando o resto
+ * dos dados do lead). Leads com 0 ou 1 e-mail passam intactos.
+ * @param {Array<Record<string, any>>} rows
+ * @returns {Array<Record<string, any>>}
+ */
+function expandByEmail(rows) {
+  const out = [];
+  for (const lead of rows) {
+    const emails = String(lead.site_emails || "")
+      .split(" | ")
+      .map((e) => e.trim())
+      .filter(Boolean);
+    if (emails.length <= 1) {
+      out.push(lead);
+      continue;
+    }
+    for (const email of emails) out.push({ ...lead, site_emails: email });
+  }
+  return out;
+}
+
 export class ExportBundle {
   /**
    * @param {Object} deps
@@ -37,6 +59,9 @@ export class ExportBundle {
    * @param {{ render:(html:string)=>Promise<Buffer> }} [options.pdfRenderer] necessário p/ PDF
    * @param {string} [options.locale] idioma dos relatórios (ex.: "pt-BR", "en-US")
    * @param {boolean} [options.onlyWithEmail=false] exporta só leads com `site_emails` preenchido
+   * @param {boolean} [options.combined=false] junta TODAS as buscas numa planilha só (por lista), na raiz do ZIP
+   * @param {boolean} [options.oneEmailPerRow=false] duplica o lead (1 e-mail por linha) quando há vários e-mails
+   * @param {string[]|null} [options.statuses=null] filtra a lista "com site" por `cwv_status` (ex.: ["BOM","FORA DO AR"]); `null`/vazio = todos. "N/A" cobre leads não medidos
    * @returns {Promise<{ buffer: Buffer, totalReports: number }>}
    */
   async build(buscas, options = {}) {
@@ -48,10 +73,27 @@ export class ExportBundle {
       pdfRenderer = null,
       locale = undefined,
       onlyWithEmail = false,
+      combined = false,
+      oneEmailPerRow = false,
+      statuses = null,
     } = options;
 
     const hasEmail = (lead) => String(lead.site_emails || "").trim() !== "";
     const keep = (rows) => (onlyWithEmail ? rows.filter(hasEmail) : rows);
+
+    // Filtro por status de performance — só faz sentido na lista "com site"
+    // (a "sem site" nunca é medida). Leads não medidos (status vazio) contam
+    // como "N/A".
+    const statusOf = (lead) => {
+      const s = String(lead.cwv_status || "").trim();
+      return s === "" ? "N/A" : s;
+    };
+    const allowedStatus =
+      Array.isArray(statuses) && statuses.length ? new Set(statuses) : null;
+    const keepCom = (rows) => {
+      const base = keep(rows);
+      return allowedStatus ? base.filter((l) => allowedStatus.has(statusOf(l))) : base;
+    };
 
     const wantHtml = reports === "html" || reports === "both";
     const wantPdf = (reports === "pdf" || reports === "both") && !!pdfRenderer;
@@ -62,23 +104,16 @@ export class ExportBundle {
     const reportsDir = f.reportsDir;
 
     const zip = new JSZip();
-    const usedFolders = new Map();
     let totalReports = 0;
 
-    for (const busca of buscas) {
-      // Pasta única por busca.
-      let folderName = slugify(busca.query, "busca");
-      const fn = (usedFolders.get(folderName) || 0) + 1;
-      usedFolders.set(folderName, fn);
-      if (fn > 1) folderName = `${folderName}-${fn}`;
-      const folder = zip.folder(folderName);
-
-      // 1) Relatórios (HTML/PDF) e referência do arquivo em cada lead enriquecido.
-      const usedFiles = new Map();
-      const comSite = [];
-      for (const lead of keep(busca.comSite)) {
+    // Gera os relatórios (HTML/PDF) dos leads "com site" numa pasta e devolve a
+    // lista com a coluna `relatorio_arquivo` apontando para o arquivo no ZIP.
+    // `usedFiles` é compartilhável para evitar colisões de nome no modo combinado.
+    const processComSite = async (leads, folder, usedFiles = new Map()) => {
+      const out = [];
+      for (const lead of leads) {
         if (!lead.cwv_report || reports === "none") {
-          comSite.push({ ...lead, relatorio_arquivo: "" });
+          out.push({ ...lead, relatorio_arquivo: "" });
           continue;
         }
         let base = `${f.reportPrefix}-${slugify(lead.nome, "lead")}`;
@@ -93,26 +128,80 @@ export class ExportBundle {
           ref = `${reportsDir}/${base}.html`;
         }
         if (wantPdf) {
-          const pdf = await pdfRenderer.render(html);
-          folder.file(`${reportsDir}/${base}.pdf`, pdf);
-          if (!ref) ref = `${reportsDir}/${base}.pdf`;
+          // O PDF depende de um Chromium renderizando um template com CDNs
+          // (Tailwind/Iconify/Fontes); sob carga ou rede instável uma página
+          // pode falhar. Tentamos com 1 retry e, se ainda assim falhar, caímos
+          // para o HTML — assim o lead nunca fica sem relatório (célula vazia).
+          let pdf = null;
+          for (let attempt = 0; attempt < 2 && !pdf; attempt++) {
+            try {
+              pdf = await pdfRenderer.render(html);
+            } catch (e) {
+              if (attempt === 1)
+                console.warn(`[export] PDF falhou para "${lead.nome}": ${e?.message || e}`);
+            }
+          }
+          if (pdf) {
+            folder.file(`${reportsDir}/${base}.pdf`, pdf);
+            if (!ref) ref = `${reportsDir}/${base}.pdf`;
+          } else if (!ref) {
+            // Fallback: grava o HTML para não perder o relatório deste lead.
+            folder.file(`${reportsDir}/${base}.html`, html);
+            ref = `${reportsDir}/${base}.html`;
+          }
         }
         totalReports++;
-        comSite.push({ ...lead, relatorio_arquivo: ref });
+        out.push({ ...lead, relatorio_arquivo: ref });
       }
+      return out;
+    };
 
-      // 2) Planilhas, nos formatos e colunas escolhidos.
-      const rowsByList = { "com-site": comSite, "sem-site": keep(busca.semSite) };
+    // Escreve as planilhas de cada lista (formatos/colunas escolhidos). Quando
+    // `prependCol` é dado, ele entra como 1ª coluna (ex.: a origem da busca).
+    const writeSheets = async (folder, rowsByList, prependCol = null) => {
       for (const list of lists) {
-        const rows = rowsByList[list];
+        let rows = rowsByList[list];
         if (!rows) continue;
-        const cols = pickColumns(list, columns?.[list]);
+        if (oneEmailPerRow) rows = expandByEmail(rows);
+        let cols = pickColumns(list, columns?.[list]);
+        if (prependCol) cols = [prependCol, ...cols];
         const { file: listFile, label: listLabel } = f.list[list];
         if (formats.includes("csv")) folder.file(`${listFile}.csv`, toCSV(rows, cols));
         if (formats.includes("xlsx")) {
           const buf = await toXLSX(rows, cols, listLabel);
           folder.file(`${listFile}.xlsx`, Buffer.from(buf));
         }
+      }
+    };
+
+    if (combined) {
+      // Modo combinado: uma planilha por lista, na raiz, com todas as buscas.
+      // A coluna "Busca" identifica de qual pesquisa cada lead veio.
+      const comSiteAll = [];
+      const semSiteAll = [];
+      const usedFiles = new Map();
+      for (const busca of buscas) {
+        const comSite = await processComSite(keepCom(busca.comSite), zip, usedFiles);
+        for (const r of comSite) comSiteAll.push({ ...r, busca: busca.query });
+        for (const r of keep(busca.semSite)) semSiteAll.push({ ...r, busca: busca.query });
+      }
+      await writeSheets(
+        zip,
+        { "com-site": comSiteAll, "sem-site": semSiteAll },
+        { key: "busca", header: "Busca" }
+      );
+    } else {
+      // Modo padrão: uma pasta por busca.
+      const usedFolders = new Map();
+      for (const busca of buscas) {
+        let folderName = slugify(busca.query, "busca");
+        const fn = (usedFolders.get(folderName) || 0) + 1;
+        usedFolders.set(folderName, fn);
+        if (fn > 1) folderName = `${folderName}-${fn}`;
+        const folder = zip.folder(folderName);
+
+        const comSite = await processComSite(keepCom(busca.comSite), folder);
+        await writeSheets(folder, { "com-site": comSite, "sem-site": keep(busca.semSite) });
       }
     }
 

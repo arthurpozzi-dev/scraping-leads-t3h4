@@ -14,8 +14,12 @@
  */
 import { createLead, extractPlaceId, onlyDigits } from "../domain/Lead.js";
 
-/** Chave de deduplicação de um lead. */
-function dedupeKey(lead) {
+/**
+ * Chave de deduplicação de um lead: o place-id do Google Maps (identificador
+ * único do estabelecimento) ou, na falta dele, nome normalizado + telefone.
+ * Exportada para reuso na deduplicação ENTRE buscas (ver dedupeAcrossBuscas).
+ */
+export function dedupeKey(lead) {
   const pid = extractPlaceId(lead.link_maps);
   if (pid) return `pid:${pid}`;
   const nome = (lead.nome || "").toLowerCase().normalize("NFKD").replace(/[^\p{L}\p{N}]/gu, "");

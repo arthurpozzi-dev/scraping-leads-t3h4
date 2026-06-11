@@ -52,6 +52,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .actions { display: flex; gap: 12px; margin: 18px 0 6px; flex-wrap: wrap; }
 
 /* Resumo das etapas */
+.sumLabel {
+  font-size: 12px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .05em; margin: 16px 0 8px;
+}
 .summary { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
 .stat {
   background: #070707; border: 1px solid var(--line); border-radius: 10px;

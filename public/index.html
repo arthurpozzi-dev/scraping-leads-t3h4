@@ -81,12 +81,19 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       <div class="status" id="enrichStatus"></div>
       <div class="bar" id="enrichBar"><i id="enrichFill"></i></div>
 
+      <!-- Resumo global: soma de todas as buscas (só aparece com mais de uma) -->
+      <div id="summaryGlobalWrap" style="display:none;">
+        <div class="sumLabel">Total — todas as buscas</div>
+        <div class="summary" id="summaryGlobal"></div>
+      </div>
+
       <!-- Seletor de busca (aparece quando há mais de uma) -->
       <div id="buscaPicker" style="display:none;margin:18px 0 4px;">
         <label for="buscaSel">Busca</label>
         <select id="buscaSel"></select>
       </div>
 
+      <div id="summaryCurrentLabel" class="sumLabel" style="display:none;">Esta busca</div>
       <div class="summary" id="summary"></div>
 
       <div class="tabs">
@@ -130,6 +137,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
           <span class="check"><input type="checkbox" id="ex-com" checked /> Com site (<span id="ex-com-n">0</span>)</span>
           <span class="check"><input type="checkbox" id="ex-sem" checked /> Sem site (<span id="ex-sem-n">0</span>)</span>
           <span class="check" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);"><input type="checkbox" id="ex-only-email" /> Só leads com e-mail preenchido</span>
+          <span class="check"><input type="checkbox" id="ex-one-email" checked /> Um e-mail por linha (duplica o lead)</span>
         </fieldset>
 
         <fieldset class="exGroup">
@@ -138,6 +146,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
             <option value="all">Todas as buscas</option>
             <option value="current">Só a busca atual</option>
           </select>
+          <span class="check" style="margin-top:8px;"><input type="checkbox" id="ex-combined" /> Juntar todas as buscas numa planilha só</span>
         </fieldset>
 
         <fieldset class="exGroup">
@@ -162,6 +171,18 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
             <option value="es">Español</option>
           </select>
           <small style="color:var(--muted); display:block; margin-top:8px;">Só para leads com site enriquecido (Core Web Vitals). PDF é mais lento.</small>
+        </fieldset>
+
+        <fieldset class="exGroup full">
+          <legend>Status de performance — lista “com site” <button type="button" class="linklike" data-toggle="ex-status-group">marcar/desmarcar todas</button></legend>
+          <div class="colgrid" id="ex-status-group">
+            <label class="check"><input type="checkbox" value="BOM" checked /> Bom</label>
+            <label class="check"><input type="checkbox" value="MÉDIO" checked /> Médio</label>
+            <label class="check"><input type="checkbox" value="RUIM" checked /> Ruim</label>
+            <label class="check"><input type="checkbox" value="FORA DO AR" checked /> Fora do ar</label>
+            <label class="check"><input type="checkbox" value="N/A" checked /> Não medido</label>
+          </div>
+          <small style="color:var(--muted); display:block; margin-top:8px;">Filtra a lista “com site” pela coluna Status (Core Web Vitals). “Não medido” = leads ainda sem análise.</small>
         </fieldset>
 
         <fieldset class="exGroup full" id="ex-cols-com-wrap">

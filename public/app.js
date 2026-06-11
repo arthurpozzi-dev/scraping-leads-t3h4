@@ -13,6 +13,7 @@ const $ = (id) => document.getElementById(id);
 const COLS_COM = [
   ["nome", "Nome"], ["categoria", "Categoria"], ["nota", "Nota"],
   ["avaliacoes", "Avaliações"], ["telefone", "Telefone"], ["whatsapp", "WhatsApp", "link"],
+  ["endereco", "Endereço"],
   ["site", "Site", "link"], ["redes_sociais", "Redes", "links"],
   ["site_emails", "E-mails", "emails"],
   ["cwv_score", "Perf."], ["cwv_status", "Status", "cwv"],
@@ -22,6 +23,7 @@ const COLS_COM = [
 const COLS_SEM = [
   ["nome", "Nome"], ["categoria", "Categoria"], ["nota", "Nota"],
   ["avaliacoes", "Avaliações"], ["telefone", "Telefone"], ["whatsapp", "WhatsApp", "link"],
+  ["endereco", "Endereço"],
   ["redes_sociais", "Redes", "links"], ["descricao", "Descrição"], ["link_maps", "Maps", "link"],
 ];
 
@@ -182,26 +184,79 @@ function renderTable(tableId, cols, rows) {
     .join("");
 }
 
-function renderSummary(stats) {
+/**
+ * Calcula o resumo COMPLETO de um conjunto de buscas. Como tudo é derivado das
+ * listas (atualizadas a cada operação — enriquecer, e-mails, texto), passar uma
+ * busca dá o resumo dela; passar todas dá o total global. As seções de
+ * performance, e-mail e texto só aparecem depois que a operação rodou.
+ * @returns {[string, number|string][]} pares [rótulo, valor]
+ */
+function summaryItems(buscas) {
+  const com = buscas.flatMap((b) => b.comSite || []);
+  const sem = buscas.flatMap((b) => b.semSite || []);
+  const sumStat = (k) => buscas.reduce((s, b) => s + (b.stats?.[k] ?? 0), 0);
+  const hasStat = (k) => buscas.some((b) => b.stats && b.stats[k] != null);
+
+  const nonEmpty = (v) => String(v || "").trim() !== "";
+  const emailsDe = (l) => String(l.site_emails || "").split(" | ").filter(Boolean);
+  const countStatus = (s) => com.filter((l) => (l.cwv_status || "") === s).length;
+
+  const comEmail = com.filter((l) => nonEmpty(l.site_emails)).length;
+  const totalEmails = com.reduce((s, l) => s + emailsDe(l).length, 0);
+  const comTexto = com.filter((l) => nonEmpty(l.site_texto)).length;
+  const enriquecidos = com.some((l) => nonEmpty(l.cwv_status));
+  const emailsRodou = com.some((l) => nonEmpty(l.site_emails) || nonEmpty(l.site_emails_erro));
+  const textoRodou = com.some((l) => nonEmpty(l.site_texto) || nonEmpty(l.site_texto_erro));
+
+  // Funil do pipeline (sempre).
   const items = [
-    ["Coletados", stats.bruto],
-    ["Após limpeza", stats.limpos],
-    ["Após filtro", stats.filtrados],
-    ["Com site", stats.comSite],
-    ["Sem site", stats.semSite],
+    ["Coletados", hasStat("bruto") ? sumStat("bruto") : "—"],
+    ["Após limpeza", hasStat("limpos") ? sumStat("limpos") : "—"],
+    ["Após filtro", hasStat("filtrados") ? sumStat("filtrados") : "—"],
+    ["Com site", com.length],
+    ["Sem site", sem.length],
   ];
-  $("summary").innerHTML = items
+  // Performance (só depois de enriquecer os sites).
+  if (enriquecidos) {
+    items.push(
+      ["Perf. boa", countStatus("BOM")],
+      ["Perf. média", countStatus("MÉDIO")],
+      ["Perf. ruim", countStatus("RUIM")],
+      ["Fora do ar", countStatus("FORA DO AR")],
+      ["Sem dados", countStatus("N/A")]
+    );
+  }
+  // E-mails (só depois de enriquecer e-mails).
+  if (emailsRodou) items.push(["Com e-mail", comEmail], ["Total de e-mails", totalEmails]);
+  // Texto dos sites (só depois de puxar o texto).
+  if (textoRodou) items.push(["Com texto", comTexto]);
+
+  return items;
+}
+
+/** Pinta os chips de estatística num container. */
+function renderStatItems(containerId, items) {
+  $(containerId).innerHTML = items
     .map(([label, n]) => `<div class="stat"><b>${n}</b><span>${label}</span></div>`)
     .join("");
-  $("countCom").textContent = stats.comSite;
-  $("countSem").textContent = stats.semSite;
+}
+
+/** Painel global: soma de TODAS as buscas (aparece só quando há mais de uma). */
+function renderGlobalSummary() {
+  const show = state.buscas.length > 1;
+  $("summaryGlobalWrap").style.display = show ? "" : "none";
+  $("summaryCurrentLabel").style.display = show ? "" : "none";
+  if (show) renderStatItems("summaryGlobal", summaryItems(state.buscas));
 }
 
 /** Renderiza a busca atualmente selecionada. */
 function renderCurrent() {
   const b = state.buscas[state.current];
   if (!b) return;
-  renderSummary(b.stats);
+  renderStatItems("summary", summaryItems([b]));
+  $("countCom").textContent = (b.comSite || []).length;
+  $("countSem").textContent = (b.semSite || []).length;
+  renderGlobalSummary();
   renderTable("tableCom", COLS_COM, b.comSite);
   renderTable("tableSem", COLS_SEM, b.semSite);
 }
@@ -254,8 +309,11 @@ function start() {
     state.buscas = d.buscas;
     state.current = 0;
     setBar("bar", "barfill", 100);
-    const totalFiltrados = d.buscas.reduce((s, b) => s + b.stats.filtrados, 0);
-    setStatus(`Concluído: ${d.buscas.length} busca(s), ${totalFiltrados} leads após o filtro.`);
+    const totalLeads = d.buscas.reduce((s, b) => s + b.stats.comSite + b.stats.semSite, 0);
+    const dups = d.duplicatasRemovidas
+      ? ` (${d.duplicatasRemovidas} duplicata(s) entre buscas removida(s))`
+      : "";
+    setStatus(`Concluído: ${d.buscas.length} busca(s), ${totalLeads} leads sem duplicatas${dups}.`);
 
     setupBuscaPicker();
     renderCurrent();
@@ -395,7 +453,7 @@ function renderColCheckboxes(containerId, cols) {
   $(containerId).innerHTML = cols
     .map(
       (c) =>
-        `<label class="check"><input type="checkbox" value="${c.key}" checked /> ${c.header}</label>`
+        `<label class="check"><input type="checkbox" value="${c.key}" ${c.default === false ? "" : "checked"} /> ${c.header}</label>`
     )
     .join("");
 }
@@ -409,14 +467,29 @@ async function ensureExportCols() {
   renderColCheckboxes("ex-cols-sem", exportCols["sem-site"]);
 }
 
-/** Soma de leads por lista, conforme a abrangência e o filtro de e-mail. */
+/** Status de performance marcados no modal (lista "com site"). */
+function selectedStatuses() {
+  return [...document.querySelectorAll("#ex-status-group input:checked")].map((i) => i.value);
+}
+
+/** Status de um lead, tratando "não medido" (vazio) como "N/A". */
+function statusOf(lead) {
+  const s = String(lead.cwv_status || "").trim();
+  return s === "" ? "N/A" : s;
+}
+
+/** Soma de leads por lista, conforme abrangência, filtro de e-mail e de status. */
 function exportCounts() {
   const buscas = $("ex-scope").value === "current" ? [state.buscas[state.current]] : state.buscas;
   const onlyEmail = $("ex-only-email").checked;
+  const statuses = selectedStatuses();
+  const allStatus = statuses.length === 0 || statuses.length >= 5;
   const has = (l) => String(l.site_emails || "").trim() !== "";
-  const n = (rows) => (onlyEmail ? rows.filter(has).length : rows.length);
+  const okStatus = (l) => allStatus || statuses.includes(statusOf(l));
+  const nCom = (rows) => rows.filter((l) => (!onlyEmail || has(l)) && okStatus(l)).length;
+  const nSem = (rows) => (onlyEmail ? rows.filter(has).length : rows.length);
   return buscas.filter(Boolean).reduce(
-    (acc, b) => ({ com: acc.com + n(b.comSite), sem: acc.sem + n(b.semSite) }),
+    (acc, b) => ({ com: acc.com + nCom(b.comSite), sem: acc.sem + nSem(b.semSite) }),
     { com: 0, sem: 0 }
   );
 }
@@ -437,6 +510,8 @@ async function openExportModal() {
   if (!state.id) return;
   await ensureExportCols();
   // Abrangência: só mostra "todas" quando há mais de uma busca.
+  $("ex-combined").checked = false;
+  $("ex-scope").disabled = false;
   $("ex-scope").value = state.buscas.length > 1 ? "all" : "current";
   refreshExportCounts();
   syncColGroups();
@@ -465,6 +540,9 @@ function exportConfig() {
     reports: $("ex-reports").value,
     locale: $("ex-lang").value,
     onlyWithEmail: $("ex-only-email").checked,
+    oneEmailPerRow: $("ex-one-email").checked,
+    combined: $("ex-combined").checked,
+    statuses: selectedStatuses(),
     columns: { "com-site": pick("ex-cols-com"), "sem-site": pick("ex-cols-sem") },
   };
 }
@@ -513,6 +591,13 @@ function setupExportModal() {
   $("ex-sem").addEventListener("change", syncColGroups);
   $("ex-scope").addEventListener("change", refreshExportCounts);
   $("ex-only-email").addEventListener("change", refreshExportCounts);
+  $("ex-status-group").addEventListener("change", refreshExportCounts);
+  // "Planilha única" junta todas as buscas: a abrangência por busca não se aplica.
+  $("ex-combined").addEventListener("change", (e) => {
+    $("ex-scope").disabled = e.target.checked;
+    if (e.target.checked) $("ex-scope").value = "all";
+    refreshExportCounts();
+  });
   $("ex-cancel").addEventListener("click", closeExportModal);
   $("ex-go").addEventListener("click", runExport);
   // Botão "marcar/desmarcar todas" de cada grupo de colunas.
@@ -521,6 +606,7 @@ function setupExportModal() {
       const boxes = [...document.querySelectorAll(`#${btn.dataset.toggle} input`)];
       const allOn = boxes.every((b) => b.checked);
       boxes.forEach((b) => (b.checked = !allOn));
+      if (btn.dataset.toggle === "ex-status-group") refreshExportCounts();
     });
   });
   // Fecha ao clicar fora do card.

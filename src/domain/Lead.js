@@ -68,16 +68,104 @@ export function toWhatsAppLink(phone) {
 }
 
 /**
- * Formata um telefone BR para exibição: (16) 99999-9999 ou (16) 3333-4444.
- * Se não casar com o padrão, devolve o original limpo.
+ * Normaliza um telefone para exibição, de forma GENÉRICA (multipaís).
+ *
+ * O Google Maps já entrega o número formatado conforme o país do lugar
+ * (ex.: "(16) 99999-9999" no Brasil, "+1 213-373-4253" nos EUA, "+44 20 7946
+ * 0958" no Reino Unido). Por isso preservamos esse formato — só colapsamos os
+ * espaços — em vez de impor a máscara brasileira, que quebrava números
+ * estrangeiros (um número dos EUA com 11 dígitos virava "(12) 13373-4253").
  * @param {string} phone
  * @returns {string}
  */
 export function formatPhone(phone) {
-  const d = onlyDigits(phone);
-  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
-  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
   return clean(phone);
+}
+
+/** UFs brasileiras (para reconhecer o "estado" no fim do endereço). */
+const UF_SET = new Set([
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
+  "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+]);
+
+/** Países reconhecidos quando aparecem no fim do endereço (Maps às vezes os inclui). */
+const KNOWN_COUNTRIES = new Set([
+  "brasil", "brazil", "portugal", "argentina", "paraguai", "uruguai", "chile",
+  "bolívia", "bolivia", "peru", "colômbia", "colombia", "estados unidos",
+  "united states", "espanha", "españa", "méxico", "mexico",
+]);
+
+/**
+ * Separa um endereço do Google Maps (pt-BR) em componentes. É BEST-EFFORT: o
+ * endereço completo é sempre preservado em `endereco`; os campos derivados
+ * (país, estado, cidade, bairro, logradouro, número, CEP) são preenchidos quando
+ * o formato é reconhecível. Formato típico do Maps:
+ *   "Logradouro, Número - Bairro, Cidade - UF, CEP[, País]"
+ * @param {string} raw
+ * @returns {{ endereco:string, logradouro:string, numero:string, bairro:string, cidade:string, estado:string, cep:string, pais:string }}
+ */
+export function parseAddress(raw) {
+  const full = clean(raw);
+  const out = {
+    endereco: full, logradouro: "", numero: "", bairro: "",
+    cidade: "", estado: "", cep: "", pais: "",
+  };
+  if (!full) return out;
+
+  let segs = full.split(",").map((s) => s.trim()).filter(Boolean);
+
+  // CEP (00000-000 ou 00000000) — pode estar em qualquer segmento.
+  for (let i = 0; i < segs.length; i++) {
+    const m = segs[i].match(/\d{5}-?\d{3}/);
+    if (m) {
+      out.cep = m[0].replace(/^(\d{5})-?(\d{3})$/, "$1-$2");
+      segs[i] = segs[i].replace(m[0], "").trim();
+      break;
+    }
+  }
+  segs = segs.filter(Boolean);
+
+  // País: último segmento, se for um país conhecido.
+  if (segs.length && KNOWN_COUNTRIES.has(segs[segs.length - 1].toLowerCase())) {
+    out.pais = segs.pop();
+  }
+
+  // "Cidade - UF": último segmento com " - " cuja parte direita é uma UF.
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const idx = segs[i].lastIndexOf(" - ");
+    if (idx === -1) continue;
+    const right = segs[i].slice(idx + 3).trim();
+    if (UF_SET.has(right.toUpperCase())) {
+      out.estado = right.toUpperCase();
+      out.cidade = segs[i].slice(0, idx).trim();
+      segs.splice(i, 1);
+      break;
+    }
+  }
+
+  // "Número - Bairro": segmento que começa por número e tem " - ".
+  for (let i = 0; i < segs.length; i++) {
+    const idx = segs[i].indexOf(" - ");
+    if (idx === -1) continue;
+    const left = segs[i].slice(0, idx).trim();
+    if (/^\d+[A-Za-z]?$/.test(left)) {
+      out.numero = left;
+      out.bairro = segs[i].slice(idx + 3).trim();
+      segs.splice(i, 1);
+      break;
+    }
+  }
+
+  // Logradouro: primeiro segmento restante.
+  if (segs.length) out.logradouro = segs.shift();
+  // Número avulso logo após o logradouro (ex.: "Av. X, 123, Bairro").
+  if (!out.numero && segs.length && /^\d+[A-Za-z]?$/.test(segs[0])) out.numero = segs.shift();
+  // Bairro: o que sobrar, se ainda não preenchido.
+  if (!out.bairro && segs.length) out.bairro = segs.join(", ");
+  // País padrão quando há UF brasileira mas o Maps não trouxe o país.
+  if (!out.pais && out.estado) out.pais = "Brasil";
+
+  return out;
 }
 
 /**
@@ -105,6 +193,7 @@ export function formatPhone(phone) {
  */
 export function createLead(raw = {}) {
   const telefoneFmt = formatPhone(raw.telefone);
+  const addr = parseAddress(raw.endereco);
   return {
     nome: clean(raw.nome),
     categoria: clean(raw.categoria),
@@ -113,6 +202,15 @@ export function createLead(raw = {}) {
       typeof raw.avaliacoes === "number" ? raw.avaliacoes : parseReviews(raw.avaliacoes),
     telefone: telefoneFmt,
     whatsapp: clean(raw.whatsapp) || toWhatsAppLink(telefoneFmt),
+    // Endereço completo + componentes derivados (best-effort).
+    endereco: addr.endereco,
+    logradouro: addr.logradouro,
+    numero: addr.numero,
+    bairro: addr.bairro,
+    cidade: addr.cidade,
+    estado: addr.estado,
+    cep: addr.cep,
+    pais: addr.pais,
     site: clean(raw.site),
     site_bruto: clean(raw.site_bruto || raw.site),
     redes_sociais: clean(raw.redes_sociais),

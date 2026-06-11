@@ -74,6 +74,10 @@ const PLACEHOLDER_DOMAINS = new Set([
   "domain.com", "yourdomain.com", "seudominio.com", "seudominio.com.br",
   "yoursite.com", "seusite.com", "seusite.com.br", "email.com",
   "mydomain.com", "meudominio.com", "site.com", "test.com", "teste.com",
+  // Domínios de demonstração/template (Wix, Squarespace etc. usam estes nos
+  // exemplos que ficam no HTML — não são o contato real do estabelecimento).
+  "mysite.com", "mywebsite.com", "yourwebsite.com", "website.com",
+  "sitename.com", "yourcompany.com",
 ]);
 
 /**
@@ -116,6 +120,30 @@ export function isJunkEmail(email) {
   // "Não responda": e-mail real, mas não serve para contatar o lead.
   if (NOREPLY_RE.test(local)) return true;
   return false;
+}
+
+/**
+ * Normaliza um e-mail cru extraído do HTML:
+ *   - decodifica percent-encoding (ex.: "%20" = espaço, comum em hrefs);
+ *   - remove espaços e lixo de pontuação nas pontas.
+ * Resolve o caso de e-mails que vinham com "%20" colado na frente (ex.:
+ * "%20contato@site.com"), que eram tratados como um e-mail DIFERENTE do real.
+ * @param {string} raw
+ * @returns {string} e-mail em minúsculas, sem lixo nas pontas.
+ */
+export function normalizeEmail(raw) {
+  let s = (raw || "").trim();
+  if (s.includes("%")) {
+    try {
+      s = decodeURIComponent(s);
+    } catch {
+      /* sequência percent inválida: segue com o original */
+    }
+  }
+  s = s.toLowerCase().replace(/\s+/g, "");
+  s = s.replace(/^[^a-z0-9]+/, ""); // lixo antes do "local part" (ex.: resto de %20)
+  s = s.replace(/[).,;:>'"]+$/, ""); // pontuação após o domínio
+  return s;
 }
 
 /** Valida e filtra falsos positivos (assets, domínios inválidos, lixo/telemetria). */
@@ -165,7 +193,7 @@ export function extractEmails(html) {
 
   // 1) Links mailto: (inclui botões <a class="btn" href="mailto:...">).
   for (const m of html.matchAll(/mailto:([^"'?\s>]+)/gi)) {
-    const e = decodeURIComponent(m[1]).trim().toLowerCase();
+    const e = normalizeEmail(m[1]);
     if (isRealEmail(e)) found.add(e);
   }
 
@@ -175,13 +203,13 @@ export function extractEmails(html) {
     .replace(/\s*[\[(]\s*at\s*[\])]\s*/gi, "@")
     .replace(/\s*[\[(]\s*dot\s*[\])]\s*/gi, ".");
   for (const m of desofuscado.matchAll(EMAIL_RE)) {
-    const e = m[0].trim().toLowerCase();
+    const e = normalizeEmail(m[0]);
     if (isRealEmail(e)) found.add(e);
   }
 
   // 3) E-mails protegidos pelo Cloudflare (data-cfemail / email-protection#hex).
   for (const e of decodeCloudflareEmails(html)) {
-    const x = e.trim().toLowerCase();
+    const x = normalizeEmail(e);
     if (isRealEmail(x)) found.add(x);
   }
 

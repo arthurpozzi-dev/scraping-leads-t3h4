@@ -5,7 +5,7 @@
 import ExcelJS from "exceljs";
 
 /** Larguras maiores para colunas que costumam ter texto longo. */
-const WIDE_KEYS = new Set(["link_maps", "site", "redes_sociais", "descricao"]);
+const WIDE_KEYS = new Set(["link_maps", "site", "redes_sociais", "descricao", "endereco"]);
 
 /**
  * @param {Array<Record<string, any>>} rows

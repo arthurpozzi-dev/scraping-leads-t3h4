@@ -174,6 +174,7 @@ async function extractCards(page, maxResults) {
         nota: ratingText,
         avaliacoes: reviewsText,
         telefone: "",
+        endereco: "",
         site_bruto: "",
         redes_sociais: "",
         descricao: "",
@@ -215,6 +216,7 @@ function readOpenDetail(page, socialDomains) {
     );
     const categoria = clean(document.querySelector("button[jsaction*='category']")?.textContent);
     const telefone = stripLabel(byItemStart("phone:tel:"));
+    const endereco = stripLabel(byItem("address"));
     const siteBruto = byItem("authority")?.getAttribute("href") || "";
 
     // Descrição / resumo editorial, quando existe.
@@ -238,6 +240,7 @@ function readOpenDetail(page, socialDomains) {
       nota,
       avaliacoes,
       telefone,
+      endereco,
       site_bruto: siteBruto,
       redes_sociais: [...redes].join(" | "),
       descricao,
@@ -323,6 +326,7 @@ export class GoogleMapsScraper {
               )?.textContent
             ),
             telefone: stripLabel(byItemStart("phone:tel:")),
+            endereco: stripLabel(byItem("address")),
             site_bruto: byItem("authority")?.getAttribute("href") || "",
             redes_sociais: [...redes].join(" | "),
             descricao: clean(document.querySelector(".PYvSYb")?.textContent || ""),
@@ -375,6 +379,7 @@ export class GoogleMapsScraper {
                     nota: d.nota || results[i].nota,
                     avaliacoes: d.avaliacoes || results[i].avaliacoes,
                     telefone: d.telefone || results[i].telefone,
+                    endereco: d.endereco || results[i].endereco,
                     site_bruto: d.site_bruto || results[i].site_bruto,
                     redes_sociais: d.redes_sociais || results[i].redes_sociais,
                     descricao: d.descricao || results[i].descricao,

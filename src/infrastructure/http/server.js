@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
 import { runPipeline } from "../../application/runPipeline.js";
+import { dedupeAcrossBuscas } from "../../application/dedupeAcrossBuscas.js";
 import { enrichLeads } from "../../application/EnrichLeads.js";
 import { scrapeSiteTexts } from "../../application/scrapeSiteTexts.js";
 import { enrichEmails } from "../../application/enrichEmails.js";
@@ -129,9 +130,15 @@ export function createServer({ scraper, siteTextScraper, emailScraper, makeBrows
         }
       }
 
+      // Remove duplicatas ENTRE as buscas (mesmo lugar em pesquisas diferentes)
+      // antes de armazenar — assim o enriquecimento, os e-mails e a planilha
+      // final já trabalham sem repetições.
+      const { removed } = dedupeAcrossBuscas(buscas);
+      if (removed) send("progress", { message: `${removed} duplicata(s) entre buscas removida(s).` });
+
       const id = randomUUID();
       store.set(id, { ts: Date.now(), buscas });
-      send("done", { id, buscas });
+      send("done", { id, buscas, duplicatasRemovidas: removed });
     } catch (err) {
       send("error", { message: err.message || "Falha ao coletar." });
     } finally {
@@ -302,12 +309,25 @@ export function createServer({ scraper, siteTextScraper, emailScraper, makeBrows
     const reports = ["none", "html", "pdf", "both"].includes(cfg.reports) ? cfg.reports : "none";
     const locale = SUPPORTED_LOCALES.includes(cfg.locale) ? cfg.locale : DEFAULT_LOCALE;
     const onlyWithEmail = cfg.onlyWithEmail === true;
+    const oneEmailPerRow = cfg.oneEmailPerRow === true;
+    const combined = cfg.combined === true;
+    // Filtro por status de performance (lista "com site"). Aceita só os valores
+    // conhecidos; lista completa ou vazia => sem filtro (null).
+    const VALID_STATUSES = ["BOM", "MÉDIO", "RUIM", "FORA DO AR", "N/A"];
+    const pickedStatuses = (Array.isArray(cfg.statuses) ? cfg.statuses : []).filter((s) =>
+      VALID_STATUSES.includes(s)
+    );
+    const statuses =
+      pickedStatuses.length && pickedStatuses.length < VALID_STATUSES.length
+        ? pickedStatuses
+        : null;
     const columns =
       cfg.columns && typeof cfg.columns === "object" && !Array.isArray(cfg.columns) ? cfg.columns : null;
 
-    // Abrangência: todas as buscas (padrão) ou só uma (índice).
+    // Abrangência: o modo combinado sempre junta todas; senão, todas (padrão) ou
+    // só uma (índice).
     const buscas =
-      cfg.scope === "all" || cfg.scope == null
+      combined || cfg.scope === "all" || cfg.scope == null
         ? item.buscas
         : [item.buscas[parseInt(cfg.scope, 10)]].filter(Boolean);
 
@@ -320,7 +340,7 @@ export function createServer({ scraper, siteTextScraper, emailScraper, makeBrows
     const needsPdf = (reports === "pdf" || reports === "both") && typeof makePdfRenderer === "function";
     const pdfRenderer = needsPdf ? makePdfRenderer() : null;
     try {
-      const { buffer } = await exportBundle.build(buscas, { lists, formats, columns, reports, pdfRenderer, locale, onlyWithEmail });
+      const { buffer } = await exportBundle.build(buscas, { lists, formats, columns, reports, pdfRenderer, locale, onlyWithEmail, combined, oneEmailPerRow, statuses });
       const base = buscas.length === 1 ? slugify(buscas[0].query, "leads") : "leads";
       res.setHeader("Content-Type", "application/zip");
       res.setHeader("Content-Disposition", `attachment; filename="${base}-export.zip"`);

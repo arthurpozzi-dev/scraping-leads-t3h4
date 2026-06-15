@@ -27,6 +27,7 @@ import { dedupeAcrossBuscas } from "../../application/dedupeAcrossBuscas.js";
 import { enrichLeads } from "../../application/EnrichLeads.js";
 import { scrapeSiteTexts } from "../../application/scrapeSiteTexts.js";
 import { enrichEmails } from "../../application/enrichEmails.js";
+import { enrichSocials } from "../../application/enrichSocials.js";
 import { PageSpeedClient } from "../pagespeed/PageSpeedClient.js";
 import { toCSV } from "../export/csvExporter.js";
 import { toXLSX } from "../export/xlsxExporter.js";
@@ -72,9 +73,10 @@ const totalComSite = (buscas) => buscas.reduce((s, b) => s + b.comSite.length, 0
  * @param {import("../report/AuditReportRenderer.js").AuditReportRenderer} deps.reportRenderer
  * @param {import("../export/ExportBundle.js").ExportBundle} deps.exportBundle
  * @param {import("../scraper/SiteHealthChecker.js").SiteHealthChecker} deps.siteHealthChecker
+ * @param {import("../scraper/SocialSearchScraper.js").SocialSearchScraper} [deps.socialSearchScraper] descoberta de redes por busca web (opt-in)
  * @returns {import("express").Express}
  */
-export function createServer({ scraper, siteTextScraper, emailScraper, makeBrowserEmailScraper, makePdfRenderer, reportRenderer, exportBundle, siteHealthChecker }) {
+export function createServer({ scraper, siteTextScraper, emailScraper, makeBrowserEmailScraper, makePdfRenderer, reportRenderer, exportBundle, siteHealthChecker, socialSearchScraper }) {
   const app = express();
   app.use(express.json());
   app.use(express.static(PUBLIC_DIR));
@@ -269,6 +271,65 @@ export function createServer({ scraper, siteTextScraper, emailScraper, makeBrows
       send("done", { ok, semEmail, falhas, renderizados, comSitePerBusca: item.buscas.map((b) => b.comSite) });
     } catch (err) {
       send("error", { message: err.message || "Falha ao buscar e-mails." });
+    } finally {
+      await browserScraper?.close();
+      res.end();
+    }
+  });
+
+  // ---- Descoberta de redes sociais em todas as buscas -------------------
+  app.get("/api/socials/:id", async (req, res) => {
+    const send = sseSender(res);
+    const item = store.get(req.params.id);
+    if (!item) {
+      send("error", { message: "Resultado expirado. Faça uma nova busca." });
+      return res.end();
+    }
+    const concurrency =
+      parseInt(req.query.conc, 10) || parseInt(process.env.SOCIAL_CONCURRENCY, 10) || 6;
+    // Fallback com navegador (sites JS): ligado por padrão, desligável com render=0.
+    const useBrowser = req.query.render !== "0" && typeof makeBrowserEmailScraper === "function";
+    const browserScraper = useBrowser ? makeBrowserEmailScraper() : null;
+    const browserConcurrency =
+      parseInt(req.query.bconc, 10) || parseInt(process.env.EMAIL_BROWSER_CONCURRENCY, 10) || 2;
+    // Busca web (descoberta para quem não tem rede): opt-in via search=1.
+    const useSearch = req.query.search === "1" && !!socialSearchScraper;
+
+    let ok = 0;
+    let semRedes = 0;
+    let falhas = 0;
+    let viaBusca = 0;
+    const sendProgress = (p, query) =>
+      send("progress", { fase: p.fase, current: p.current, total: p.total, nome: p.nome, encontrados: p.encontrados, query });
+    try {
+      for (const b of item.buscas) {
+        const r = await enrichSocials(
+          { comSite: b.comSite, semSite: b.semSite },
+          { emailScraper, browserScraper, socialSearchScraper: useSearch ? socialSearchScraper : null },
+          (p) => {
+            if (p.erro) console.warn(`[socials] "${p.nome}": ${p.erro}`);
+            sendProgress(p, b.query);
+          },
+          { concurrency, browserConcurrency }
+        );
+        b.comSite = r.comSite;
+        b.semSite = r.semSite;
+        ok += r.ok;
+        semRedes += r.semRedes;
+        falhas += r.falhas;
+        viaBusca += r.viaBusca;
+      }
+      item.ts = Date.now();
+      send("done", {
+        ok,
+        semRedes,
+        falhas,
+        viaBusca,
+        comSitePerBusca: item.buscas.map((b) => b.comSite),
+        semSitePerBusca: item.buscas.map((b) => b.semSite),
+      });
+    } catch (err) {
+      send("error", { message: err.message || "Falha ao buscar redes sociais." });
     } finally {
       await browserScraper?.close();
       res.end();

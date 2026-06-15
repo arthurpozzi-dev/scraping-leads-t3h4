@@ -30,6 +30,21 @@ Google Maps → COLETA → LIMPEZA → FILTRO → SEPARAÇÃO (com site / sem si
    clientes — pronto para apresentar ao lead. Botão **📄 venda** por item (abre em nova aba).
 7. **Puxa o texto de cada site** (botão **🔤 Puxar texto dos sites**) e grava o conteúdo
    condensado numa única célula da planilha — útil para análise/IA.
+7b. **Descobre as redes sociais** (botão **🔗 Buscar redes sociais**), complementando o que
+   o Maps já trouxe. Para leads **com site**, extrai os perfis (Instagram, Facebook, etc.)
+   do HTML do próprio site (home + páginas de contato) — desofuscando e descartando links de
+   compartilhamento/posts, mantendo só o perfil canônico (inclui **LinkedIn**: `/in/` e
+   `/company/`). Sites 100% JavaScript usam o mesmo fallback de navegador dos e-mails. Para quem
+   ficou **sem nenhuma rede** (com ou sem site), o checkbox **Redes via busca web** liga uma
+   descoberta opcional que pesquisa o nome do lead num buscador (Instagram, Facebook e LinkedIn;
+   mais lento e pode trazer o perfil errado — por isso é opt-in). Tudo é
+   **mesclado** no campo *Redes Sociais*, sem perder o que já havia. O passe de **e-mails**
+   também já preenche as redes encontradas (mesmo download), de graça.
+   **Validação (double-check):** cada rede guarda de onde veio. Links do próprio site/Maps são
+   confiáveis; os achados por **busca web** ganham um ⚠️ na tabela e entram na coluna
+   **`redes_revisar`** do export (e a **`redes_confianca`** resume o lead: alta/média/baixa,
+   cruzando a fonte com o quanto o nome do negócio casa com o handle do perfil) — assim você
+   confere à mão só os incertos.
 8. **Exporta tudo num pacote** (botão **📦 Exportar tudo (.zip)**): uma **pasta por busca**,
    cada uma com as planilhas em **CSV** (com-site / sem-site) e os relatórios HTML.
    (O XLSX continua disponível nos botões avulsos por busca.)
@@ -99,6 +114,27 @@ A coleta detecta o sistema operacional automaticamente:
   Instale com `sudo apt install chromium-browser` (ou `chromium`). Para forçar um caminho
   específico, defina `CHROMIUM_PATH` no `.env`.
 
+### WSL / Ubuntu sem o Chromium do sistema (ou só com a versão *snap*)
+
+No WSL o Chromium do sistema costuma ser um **snap**, que **não funciona** com o Playwright.
+A configuração que funciona (e já está aplicada neste repo):
+
+1. **Rode o projeto no filesystem do Linux** (ex.: `~/projects/...`), nunca em `/mnt/c|f|...`
+   — no drive Windows o `node_modules` é lido via 9P e a app leva ~30s para subir (no Linux, ~2s).
+2. Baixe o Chromium do Playwright: `npx playwright install chromium`.
+3. Aponte o `.env` para ele: **`CHROMIUM_PATH=playwright`** (valor especial que ignora o snap).
+4. **Libs do Chromium** (`libnss3`, `libnspr4`, `libasound2t64`). Com `sudo`:
+   `npx playwright install-deps chromium`. **Sem `sudo`**, extraia-as localmente — a coleta
+   adiciona essa pasta ao `LD_LIBRARY_PATH` automaticamente se ela existir:
+
+   ```bash
+   mkdir -p .chromium-libs/debs && cd .chromium-libs/debs
+   apt-get download libnss3 libnspr4 libasound2t64
+   cd .. && for d in debs/*.deb; do dpkg -x "$d" extracted; done
+   ```
+
+   (`.chromium-libs/` é ignorada pelo git; recrie com os comandos acima se sumir.)
+
 ## Campos coletados
 
 | Coluna | Descrição |
@@ -110,7 +146,10 @@ A coleta detecta o sistema operacional automaticamente:
 | Telefone | Telefone formatado |
 | WhatsApp | Link `wa.me` — ver heurística abaixo |
 | Site | Site próprio (só na lista "com site") |
-| Redes Sociais | Instagram/Facebook/Linktree etc. |
+| instagram / facebook / linkedin | Perfil daquela rede, um por coluna |
+| outras_redes | Demais redes (YouTube, TikTok, Linktree, WhatsApp de site…) |
+| redes_confianca | Confiança geral das redes do lead: alta / média / baixa |
+| redes_revisar | Links a conferir à mão (descobertos por busca web) |
 | Descrição | Descrição/resumo, quando houver |
 | Link Google Maps | Link da ficha (Google Meu Negócio) |
 | Pontuação CWV | Performance 0–100 (lista "com site", após enriquecer) |

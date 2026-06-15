@@ -9,6 +9,7 @@ import { GoogleMapsScraper } from "./infrastructure/scraper/GoogleMapsScraper.js
 import { SiteTextScraper } from "./infrastructure/scraper/SiteTextScraper.js";
 import { EmailScraper } from "./infrastructure/scraper/EmailScraper.js";
 import { BrowserEmailScraper } from "./infrastructure/scraper/BrowserEmailScraper.js";
+import { SocialSearchScraper } from "./infrastructure/scraper/SocialSearchScraper.js";
 import { SiteHealthChecker } from "./infrastructure/scraper/SiteHealthChecker.js";
 import { AuditReportRenderer } from "./infrastructure/report/AuditReportRenderer.js";
 import { PdfRenderer } from "./infrastructure/report/PdfRenderer.js";
@@ -30,6 +31,7 @@ const emailScraper = new EmailScraper();
 // Fábrica: 1 navegador por requisição de e-mails (evita que uma req feche o da outra).
 const makeBrowserEmailScraper = () => new BrowserEmailScraper({ headless: true });
 const siteHealthChecker = new SiteHealthChecker();
+const socialSearchScraper = new SocialSearchScraper();
 const reportRenderer = new AuditReportRenderer();
 const exportBundle = new ExportBundle({ reportRenderer });
 // Fábrica: 1 navegador de PDF por requisição de exportação (isolamento entre reqs).
@@ -43,6 +45,7 @@ const app = createServer({
   reportRenderer,
   exportBundle,
   siteHealthChecker,
+  socialSearchScraper,
 });
 
 app.listen(PORT, () => {

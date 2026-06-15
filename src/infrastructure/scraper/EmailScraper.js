@@ -12,7 +12,7 @@
  * Reaproveita a extração/desofuscação de e-mails do SiteTextScraper. Leve e
  * rápido — usa fetch nativo, sem browser.
  */
-import { extractEmails } from "./SiteTextScraper.js";
+import { extractEmails, extractSocials } from "./SiteTextScraper.js";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -175,15 +175,17 @@ export class EmailScraper {
   }
 
   /**
-   * Faz o scraping completo de e-mails de um site: home + páginas de contato
-   * (descobertas por link e sondadas em caminhos comuns).
+   * Scraping completo de CONTATOS de um site: e-mails E redes sociais, da home +
+   * páginas de contato (descobertas por link e sondadas em caminhos comuns). Um
+   * único download serve às duas extrações.
    * @param {string} url
-   * @returns {Promise<{ emails: string[], pagesVisited: number }>}
+   * @returns {Promise<{ emails: string[], socials: string[], pagesVisited: number }>}
    * @throws se nem a página inicial puder ser carregada.
    */
-  async scrapeEmails(url) {
+  async scrapeContacts(url) {
     const { html: home, finalUrl } = await this.#fetchHome(url); // se falhar, o lead vira "erro"
     const emails = new Set(extractEmails(home));
+    const socials = new Set(extractSocials(home));
     let pagesVisited = 1;
 
     // Links de contato descobertos no HTML (prioridade) + caminhos comuns sondados.
@@ -204,11 +206,22 @@ export class EmailScraper {
         const page = await this.#get(link); // caminho comum pode ser 404: tudo bem
         pagesVisited++;
         for (const e of extractEmails(page)) emails.add(e);
+        for (const s of extractSocials(page)) socials.add(s);
       } catch {
         /* uma página de contato que falha não derruba o lead */
       }
     }
 
-    return { emails: [...emails], pagesVisited };
+    return { emails: [...emails], socials: [...socials], pagesVisited };
+  }
+
+  /**
+   * Atalho para quem quer só os e-mails (mantém a assinatura antiga).
+   * @param {string} url
+   * @returns {Promise<{ emails: string[], pagesVisited: number }>}
+   */
+  async scrapeEmails(url) {
+    const { emails, pagesVisited } = await this.scrapeContacts(url);
+    return { emails, pagesVisited };
   }
 }

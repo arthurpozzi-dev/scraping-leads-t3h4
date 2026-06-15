@@ -188,7 +188,7 @@ export class ExportBundle {
       await writeSheets(
         zip,
         { "com-site": comSiteAll, "sem-site": semSiteAll },
-        { key: "busca", header: "Busca" }
+        { key: "busca", header: "busca" }
       );
     } else {
       // Modo padrão: uma pasta por busca.

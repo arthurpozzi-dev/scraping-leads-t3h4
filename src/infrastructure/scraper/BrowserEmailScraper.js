@@ -17,7 +17,7 @@
  */
 import { chromium } from "playwright";
 import { buildLaunchOptions } from "./GoogleMapsScraper.js";
-import { extractEmails } from "./SiteTextScraper.js";
+import { extractEmails, extractSocials } from "./SiteTextScraper.js";
 import { findContactLinks } from "./EmailScraper.js";
 
 const UA =
@@ -77,11 +77,12 @@ export class BrowserEmailScraper {
   }
 
   /**
-   * Scraping de e-mails de um site renderizando-o num navegador real.
+   * Scraping de CONTATOS (e-mails + redes sociais) de um site, renderizando-o num
+   * navegador real — para sites 100% JavaScript.
    * @param {string} url
-   * @returns {Promise<{ emails: string[], pagesVisited: number }>}
+   * @returns {Promise<{ emails: string[], socials: string[], pagesVisited: number }>}
    */
-  async scrapeEmails(url) {
+  async scrapeContacts(url) {
     await this.#launch();
     const context = await this.browser.newContext({
       locale: "pt-BR",
@@ -91,6 +92,7 @@ export class BrowserEmailScraper {
     try {
       const home = await this.#renderHtml(context, url);
       const emails = new Set(extractEmails(home));
+      const socials = new Set(extractSocials(home));
       let pagesVisited = 1;
 
       const candidates = findContactLinks(home, url).slice(0, this.maxPages);
@@ -99,13 +101,24 @@ export class BrowserEmailScraper {
           const html = await this.#renderHtml(context, link);
           pagesVisited++;
           for (const e of extractEmails(html)) emails.add(e);
+          for (const s of extractSocials(html)) socials.add(s);
         } catch {
           /* página de contato que falha não derruba o lead */
         }
       }
-      return { emails: [...emails], pagesVisited };
+      return { emails: [...emails], socials: [...socials], pagesVisited };
     } finally {
       await context.close().catch(() => {});
     }
+  }
+
+  /**
+   * Atalho para quem quer só os e-mails (mantém a assinatura antiga).
+   * @param {string} url
+   * @returns {Promise<{ emails: string[], pagesVisited: number }>}
+   */
+  async scrapeEmails(url) {
+    const { emails, pagesVisited } = await this.scrapeContacts(url);
+    return { emails, pagesVisited };
   }
 }

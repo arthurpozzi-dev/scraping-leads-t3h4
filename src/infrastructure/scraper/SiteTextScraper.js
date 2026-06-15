@@ -9,6 +9,8 @@
  * pois aqui lemos o HTML inicial, sem executar scripts.
  */
 
+import { normalizeSocialUrl } from "../../domain/classification.js";
+
 /** Limite de caracteres por célula no Excel é 32.767; deixamos margem. */
 const MAX_CHARS = 32000;
 
@@ -214,6 +216,24 @@ export function extractEmails(html) {
   }
 
   return [...found].slice(0, 30);
+}
+
+/**
+ * Extrai os links de redes sociais de um HTML: varre os `href` das âncoras,
+ * normaliza cada um para a forma canônica do perfil (descartando links de
+ * compartilhamento, posts e páginas iniciais das redes) e devolve sem repetição.
+ * Reaproveita `normalizeSocialUrl` do domínio — mesma regra de `splitLeads`.
+ * @param {string} html
+ * @returns {string[]} URLs de perfis sociais, sem duplicatas (até 20).
+ */
+export function extractSocials(html) {
+  if (!html) return [];
+  const found = new Set();
+  for (const m of html.matchAll(/<a\b[^>]*\bhref\s*=\s*["']([^"']+)["']/gi)) {
+    const profile = normalizeSocialUrl(m[1].trim());
+    if (profile) found.add(profile);
+  }
+  return [...found].slice(0, 20);
 }
 
 export class SiteTextScraper {

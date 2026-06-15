@@ -4,14 +4,15 @@
   "description": "Scraper de leads do Google Maps (estilo Phantombuster) com UI local e exportacao CSV/XLSX",
   "type": "module",
   "scripts": {
+    "prestart": "node -e \"console.log('\\n  Iniciando o servidor... (a primeira carga pode levar alguns segundos)\\n')\"",
     "start": "node src/main.js",
     "test": "node test/pipeline.test.js",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {
-    "express": "^4.19.2",
     "exceljs": "^4.4.0",
+    "express": "^4.19.2",
     "jszip": "^3.10.1",
-    "playwright": "^1.45.0"
+    "playwright": "^1.61.0"
   }
 }

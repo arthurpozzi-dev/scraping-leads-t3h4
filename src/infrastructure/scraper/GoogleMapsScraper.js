@@ -11,6 +11,8 @@
  */
 import { chromium } from "playwright";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { SOCIAL_DOMAINS } from "../../domain/classification.js";
 
 /** Caminhos comuns do Chromium/Chrome em Linux, em ordem de preferência. */
@@ -21,6 +23,20 @@ const LINUX_CHROMIUM_PATHS = [
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
 ];
+
+// Libs do sistema que o Chromium precisa (libnss3, libnspr4, libasound2…), quando
+// extraídas localmente sem root (`.chromium-libs/`, ver README). Se a pasta existir,
+// adicionamos ao LD_LIBRARY_PATH do processo do navegador. Em servidores onde as libs
+// estão instaladas via apt, a pasta não existe e isto é um no-op.
+const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const LOCAL_CHROMIUM_LIBS = join(PROJECT_ROOT, ".chromium-libs", "extracted", "usr", "lib", "x86_64-linux-gnu");
+
+/** Env do navegador com as libs locais no LD_LIBRARY_PATH, se existirem; senão undefined. */
+function browserEnv() {
+  if (process.platform === "win32" || !existsSync(LOCAL_CHROMIUM_LIBS)) return undefined;
+  const prev = process.env.LD_LIBRARY_PATH || "";
+  return { ...process.env, LD_LIBRARY_PATH: prev ? `${LOCAL_CHROMIUM_LIBS}:${prev}` : LOCAL_CHROMIUM_LIBS };
+}
 
 /**
  * Monta as opções de launch do Chromium conforme o sistema operacional.
@@ -41,6 +57,13 @@ export function buildLaunchOptions(headless) {
 
   // Linux (e outros não-Windows): prioriza CHROMIUM_PATH, depois os caminhos conhecidos.
   const fromEnv = (process.env.CHROMIUM_PATH || "").trim();
+  const env = browserEnv();
+  // Valores especiais forçam o Chromium do próprio Playwright (sem executablePath).
+  // Útil quando o único Chromium do sistema é um *snap* (ex.: WSL/Ubuntu), que não
+  // funciona com o Playwright. Rode antes: `npx playwright install chromium`.
+  if (["playwright", "bundled", "0"].includes(fromEnv.toLowerCase())) {
+    return { headless, ...(env ? { env } : {}), args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] };
+  }
   const executablePath =
     (fromEnv && existsSync(fromEnv) ? fromEnv : "") ||
     LINUX_CHROMIUM_PATHS.find((p) => existsSync(p)) ||
@@ -49,6 +72,7 @@ export function buildLaunchOptions(headless) {
   return {
     headless,
     ...(executablePath ? { executablePath } : {}),
+    ...(env ? { env } : {}),
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   };
 }
@@ -107,8 +131,10 @@ async function scrollFeed(page, { maxResults, onProgress }) {
   await page.waitForSelector(feedSel, { timeout: 20000 });
 
   let stable = 0;
+  // Mais paciente: o Google carrega a lista em rajadas e, sob throttling, demora
+  // entre uma e outra. Desistir cedo era o que trazia "só 13" numa região cheia.
   const MAX_STABLE = 8; // rodadas seguidas sem crescer antes de desistir
-  const MAX_ROUNDS = 200;
+  const MAX_ROUNDS = 300;
 
   for (let i = 0; i < MAX_ROUNDS; i++) {
     const count = await countCards(page);
@@ -124,24 +150,38 @@ async function scrollFeed(page, { maxResults, onProgress }) {
       .catch(() => false);
     if (reachedEnd) break;
 
-    // Empurra o final da lista para dentro da viewport (gatilho de lazy-load).
+    // Empurra o final da lista para dentro da viewport, por vários gatilhos de
+    // lazy-load (scrollIntoView do último card + ir ao fim absoluto do feed).
     await page.evaluate((sel) => {
       const feed = document.querySelector(sel);
       if (!feed) return;
       const cards = feed.querySelectorAll("a.hfpxzc");
       const last = cards[cards.length - 1];
       if (last) last.scrollIntoView({ block: "end", behavior: "instant" });
-      feed.scrollBy(0, 1200);
+      feed.scrollTop = feed.scrollHeight; // fim absoluto, não só +1200px
     }, feedSel);
 
-    // Espera dinâmica: até ~4s, saindo assim que aparecerem cards novos.
+    // Espera dinâmica mais longa: até ~8s, saindo assim que aparecerem cards novos.
     let grew = false;
-    for (let w = 0; w < 8; w++) {
+    for (let w = 0; w < 16; w++) {
       await page.waitForTimeout(500);
       if ((await countCards(page)) > count) {
         grew = true;
         break;
       }
+    }
+
+    // Sem crescer? Antes de contar como "estável", dá um empurrão extra: sobe um
+    // pouco e volta ao fim (reativa o observer de lazy-load que às vezes "dorme").
+    if (!grew) {
+      await page.evaluate((sel) => {
+        const feed = document.querySelector(sel);
+        if (!feed) return;
+        feed.scrollBy(0, -800);
+        feed.scrollTop = feed.scrollHeight;
+      }, feedSel);
+      await page.waitForTimeout(1200);
+      if ((await countCards(page)) > count) grew = true;
     }
 
     if (grew) stable = 0;

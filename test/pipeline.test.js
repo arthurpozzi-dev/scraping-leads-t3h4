@@ -11,10 +11,12 @@ import { filterLeads } from "../src/application/FilterLeads.js";
 import { splitLeads } from "../src/application/SplitLeads.js";
 import { enrichLeads } from "../src/application/EnrichLeads.js";
 import { toWhatsAppLink, parseReviews, parseRating, parseAddress } from "../src/domain/Lead.js";
-import { isSocialOrAggregator, classifyCwv } from "../src/domain/classification.js";
+import { isSocialOrAggregator, classifyCwv, socialPlatform, normalizeSocialUrl, mergeSocialLinks, socialNameMatch, socialConfidence, recordSocialSources, evaluateSocials } from "../src/domain/classification.js";
 import { detectErrorPage } from "../src/infrastructure/scraper/SiteHealthChecker.js";
-import { extractEmails, decodeCloudflareEmails, isJunkEmail, normalizeEmail } from "../src/infrastructure/scraper/SiteTextScraper.js";
+import { extractEmails, decodeCloudflareEmails, isJunkEmail, normalizeEmail, extractSocials } from "../src/infrastructure/scraper/SiteTextScraper.js";
 import { findContactLinks, urlVariants } from "../src/infrastructure/scraper/EmailScraper.js";
+import { parseDuckResults, buildQueryTerms } from "../src/infrastructure/scraper/SocialSearchScraper.js";
+import { columnsFor } from "../src/infrastructure/export/columns.js";
 
 test("parse de nota e avaliações em PT-BR", () => {
   assert.equal(parseRating("4,7"), 4.7);
@@ -260,6 +262,79 @@ test("enriquecimento: site fora do ar vira FORA DO AR e não chama o PageSpeed",
   assert.equal(foraDoAr, 1);
 });
 
+test("socialPlatform: identifica a rede pela URL", () => {
+  assert.equal(socialPlatform("https://instagram.com/loja"), "instagram");
+  assert.equal(socialPlatform("https://m.facebook.com/Loja"), "facebook");
+  assert.equal(socialPlatform("https://x.com/loja"), "twitter");
+  assert.equal(socialPlatform("https://wa.me/5516999998888"), "whatsapp");
+  assert.equal(socialPlatform("https://minhaempresa.com.br"), ""); // site próprio
+});
+
+test("normalizeSocialUrl: canoniza perfis e descarta links de ação/conteúdo", () => {
+  // Perfis: vira https, sem www/m/query, sem barra final.
+  assert.equal(normalizeSocialUrl("https://www.instagram.com/loja/?hl=pt"), "https://instagram.com/loja");
+  assert.equal(normalizeSocialUrl("http://m.facebook.com/MinhaLoja/"), "https://facebook.com/MinhaLoja");
+  // WhatsApp: só com número (path ou ?phone=); o "?text=" puro é descartado.
+  assert.equal(normalizeSocialUrl("https://wa.me/5516999998888?text=oi"), "https://wa.me/5516999998888");
+  assert.equal(normalizeSocialUrl("https://api.whatsapp.com/send?phone=5516999998888&text=oi"), "https://wa.me/5516999998888");
+  assert.equal(normalizeSocialUrl("https://wa.me/?text=oi"), "");
+  // Facebook profile.php?id= é perfil legítimo.
+  assert.equal(normalizeSocialUrl("https://facebook.com/profile.php?id=123&ref=x"), "https://facebook.com/profile.php?id=123");
+  // Lixo: compartilhamento, posts, página inicial da rede, vídeo do YouTube.
+  assert.equal(normalizeSocialUrl("https://facebook.com/sharer/sharer.php?u=http://x.com"), "");
+  assert.equal(normalizeSocialUrl("https://twitter.com/intent/tweet?text=oi"), "");
+  assert.equal(normalizeSocialUrl("https://instagram.com/p/Abc123/"), "");
+  assert.equal(normalizeSocialUrl("https://facebook.com/"), "");
+  assert.equal(normalizeSocialUrl("https://youtube.com/watch?v=abc"), "");
+  assert.equal(normalizeSocialUrl("https://youtube.com/@canal"), "https://youtube.com/@canal");
+  // Não-social: vazio.
+  assert.equal(normalizeSocialUrl("https://empresa.com.br/sobre"), "");
+});
+
+test("normalizeSocialUrl: LinkedIn — perfis /in e /company valem; conteúdo não", () => {
+  assert.equal(socialPlatform("https://www.linkedin.com/company/minha-loja"), "linkedin");
+  assert.equal(normalizeSocialUrl("https://www.linkedin.com/company/minha-loja/?trk=x"), "https://linkedin.com/company/minha-loja");
+  assert.equal(normalizeSocialUrl("https://br.linkedin.com/in/joao-silva/"), "https://br.linkedin.com/in/joao-silva");
+  // Ações/conteúdo do LinkedIn são descartados.
+  assert.equal(normalizeSocialUrl("https://www.linkedin.com/sharing/share-offsite/?url=x"), "");
+  assert.equal(normalizeSocialUrl("https://www.linkedin.com/feed/"), "");
+  assert.equal(normalizeSocialUrl("https://www.linkedin.com/posts/alguem_abc"), "");
+  assert.equal(normalizeSocialUrl("https://www.linkedin.com/jobs/view/123"), "");
+});
+
+test("extractSocials: extrai perfis dos hrefs e deduplica", () => {
+  const html = `
+    <a href="https://www.instagram.com/loja/">insta</a>
+    <a href="https://instagram.com/loja">insta de novo</a>
+    <a href="https://facebook.com/sharer/sharer.php?u=x">compartilhar</a>
+    <a href="https://facebook.com/MinhaLoja">face</a>
+    <a href="https://empresa.com.br/contato">contato</a>`;
+  const socials = extractSocials(html);
+  assert.ok(socials.includes("https://instagram.com/loja"));
+  assert.ok(socials.includes("https://facebook.com/MinhaLoja"));
+  assert.ok(!socials.some((u) => u.includes("sharer")));     // ação de compartilhar fora
+  assert.ok(!socials.some((u) => u.includes("empresa.com"))); // site próprio fora
+  assert.equal(new Set(socials).size, socials.length);        // sem duplicatas
+});
+
+test("mergeSocialLinks: mescla e deduplica preservando o que já havia", () => {
+  // Já tinha o Instagram (forma crua do Maps); acrescenta Facebook, sem duplicar.
+  const out = mergeSocialLinks(
+    "https://www.instagram.com/loja/",
+    ["https://instagram.com/loja", "https://facebook.com/MinhaLoja"]
+  );
+  const parts = out.split(" | ");
+  assert.deepEqual(parts, ["https://instagram.com/loja", "https://facebook.com/MinhaLoja"]);
+});
+
+test("busca web: monta os termos e decodifica os resultados do DuckDuckGo", () => {
+  assert.equal(buildQueryTerms({ nome: "Padaria Pão Quente", cidade: "São Carlos", estado: "SP" }),
+    "Padaria Pão Quente São Carlos SP");
+  const realUrl = "https://www.instagram.com/padaria";
+  const html = `<a class="result__a" href="//duckduckgo.com/l/?uddg=${encodeURIComponent(realUrl)}&rut=x">Padaria</a>`;
+  assert.deepEqual(parseDuckResults(html), [realUrl]);
+});
+
 test("separação: social vai para sem-site e entra em redes_sociais", () => {
   const leads = cleanLeads([
     { nome: "ComSite", site: "https://empresa.com.br", telefone: "(16) 99999-1111" },
@@ -272,4 +347,84 @@ test("separação: social vai para sem-site e entra em redes_sociais", () => {
   const soInsta = semSite.find((l) => l.nome === "SoInsta");
   assert.equal(soInsta.site, "");
   assert.ok(soInsta.redes_sociais.includes("instagram.com/empresa"));
+});
+
+test("export: redes sociais separadas por coluna e cabeçalhos legíveis por máquina", () => {
+  const lead = {
+    redes_sociais:
+      "https://instagram.com/lojax | https://facebook.com/lojax | https://linkedin.com/company/lojax | https://wa.me/5511999998888 | https://youtube.com/@lojax",
+  };
+  const cols = columnsFor("sem-site");
+  const colByKey = (k) => cols.find((c) => c.key === k);
+
+  // Cada rede principal na sua própria coluna; o resto cai em "outras_redes".
+  assert.equal(colByKey("instagram").value(lead), "https://instagram.com/lojax");
+  assert.equal(colByKey("facebook").value(lead), "https://facebook.com/lojax");
+  assert.equal(colByKey("linkedin").value(lead), "https://linkedin.com/company/lojax");
+  assert.equal(
+    colByKey("outras_redes").value(lead),
+    "https://wa.me/5511999998888 | https://youtube.com/@lojax"
+  );
+  // Sem rede => célula vazia, não "undefined".
+  assert.equal(colByKey("instagram").value({}), "");
+  // A coluna combinada "Redes Sociais" não existe mais.
+  assert.equal(colByKey("redes_sociais"), undefined);
+  // Cabeçalhos: só [a-z0-9_], sem acento nem espaço (consumíveis por outra app).
+  for (const c of columnsFor("com-site")) assert.match(c.header, /^[a-z0-9_]+$/);
+});
+
+test("validação: casamento de nome do negócio com o handle do perfil", () => {
+  // Handle concatenado contém o nome -> casa.
+  assert.ok(socialNameMatch("Padaria Pão Quente", "https://instagram.com/padaopaoquente") >= 0.5);
+  // Stopwords ("de") são ignoradas; sobreposição de tokens conta.
+  assert.ok(socialNameMatch("Auto Center Silva", "https://instagram.com/autocentersilva") >= 0.5);
+  // Homônimo sem relação -> baixo.
+  assert.ok(socialNameMatch("Padaria Pão Quente", "https://instagram.com/joao_viagens") < 0.5);
+});
+
+test("validação: confiança depende da fonte (só 'busca' é escrutinada)", () => {
+  // Próprio site / Maps / desconhecida: alta, independente do nome.
+  assert.equal(socialConfidence("site", 0), "alta");
+  assert.equal(socialConfidence("maps", 0), "alta");
+  assert.equal(socialConfidence(undefined, 0), "alta");
+  // Busca: vira média se o nome casar, baixa se não.
+  assert.equal(socialConfidence("busca", 0.8), "media");
+  assert.equal(socialConfidence("busca", 0.1), "baixa");
+});
+
+test("validação: recordSocialSources marca só os links novos (1º a registrar vence)", () => {
+  const antes = "https://instagram.com/loja";
+  const depois = "https://instagram.com/loja | https://facebook.com/loja";
+  const f1 = recordSocialSources({}, antes, depois, "site");
+  // O link pré-existente não recebe fonte aqui; o novo recebe "site".
+  assert.equal(f1["https://instagram.com/loja"], undefined);
+  assert.equal(f1["https://facebook.com/loja"], "site");
+  // Uma fase posterior (busca) não sobrescreve quem já tem fonte.
+  const f2 = recordSocialSources(f1, depois, depois + " | https://linkedin.com/company/loja", "busca");
+  assert.equal(f2["https://facebook.com/loja"], "site");
+  assert.equal(f2["https://linkedin.com/company/loja"], "busca");
+});
+
+test("export: confiança geral e links a revisar derivam de fonte + nome", () => {
+  const lead = {
+    nome: "Loja X",
+    redes_sociais: "https://instagram.com/lojax | https://facebook.com/perfil_aleatorio_999",
+    redes_fontes: {
+      "https://instagram.com/lojax": "site", // declarado pelo site -> alta
+      "https://facebook.com/perfil_aleatorio_999": "busca", // busca + nome não casa -> baixa
+    },
+  };
+  const evals = evaluateSocials(lead);
+  assert.equal(evals.find((e) => e.plataforma === "instagram").confianca, "alta");
+  assert.equal(evals.find((e) => e.plataforma === "facebook").confianca, "baixa");
+
+  const cols = columnsFor("sem-site");
+  const colByKey = (k) => cols.find((c) => c.key === k);
+  // Geral = a pior das duas; revisar = só o link de busca incerto.
+  assert.equal(colByKey("redes_confianca").value(lead), "baixa");
+  assert.equal(colByKey("redes_revisar").value(lead), "https://facebook.com/perfil_aleatorio_999");
+  // Lead só com link de site: confiança alta e nada a revisar.
+  const limpo = { nome: "Loja X", redes_sociais: "https://instagram.com/lojax", redes_fontes: { "https://instagram.com/lojax": "site" } };
+  assert.equal(colByKey("redes_confianca").value(limpo), "alta");
+  assert.equal(colByKey("redes_revisar").value(limpo), "");
 });

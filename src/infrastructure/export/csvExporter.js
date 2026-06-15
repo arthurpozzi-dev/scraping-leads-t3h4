@@ -9,13 +9,16 @@ function esc(value) {
   return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+/** Valor de uma célula: derivado (`column.value`) ou lido direto de `row[key]`. */
+const cellValue = (column, row) => (column.value ? column.value(row) : row[column.key]);
+
 /**
  * @param {Array<Record<string, any>>} rows
- * @param {{key: string, header: string}[]} columns
+ * @param {{key: string, header: string, value?: (row: any) => any}[]} columns
  * @returns {string} conteúdo CSV (com BOM).
  */
 export function toCSV(rows, columns) {
   const header = columns.map((c) => c.header).join(";");
-  const lines = rows.map((r) => columns.map((c) => esc(r[c.key])).join(";"));
+  const lines = rows.map((r) => columns.map((c) => esc(cellValue(c, r))).join(";"));
   return "﻿" + [header, ...lines].join("\r\n");
 }

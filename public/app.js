@@ -33,7 +33,7 @@ let scrapeES = null;
 let jobES = null; // SSE de enrich/sitetext (compartilham a barra)
 
 // Botões de job (compartilham a barra de progresso de enriquecimento).
-const JOB_BTNS = ["enrich", "sitetext", "emailScrape"];
+const JOB_BTNS = ["enrich", "sitetext", "emailScrape", "socialScrape"];
 const setJobBtns = (disabled) => JOB_BTNS.forEach((id) => ($(id).disabled = disabled));
 
 const setStatus = (msg) => ($("status").textContent = msg);
@@ -58,12 +58,20 @@ function renderCell(value, type, row) {
   const v = value === null || value === undefined ? "" : value;
   if (!v && v !== 0) return "";
   if (type === "link") return `<a href="${v}" target="_blank" rel="noopener">link</a>`;
-  if (type === "links")
+  if (type === "links") {
+    const fontes = (row && row.redes_fontes) || {};
     return String(v)
       .split(" | ")
       .filter(Boolean)
-      .map((u) => `<a href="${u}" target="_blank" rel="noopener">${hostOf(u)}</a>`)
+      .map((u) => {
+        const link = `<a href="${u}" target="_blank" rel="noopener">${hostOf(u)}</a>`;
+        // Descoberto por busca web: pode ser homônimo — sinaliza para conferência.
+        return fontes[u] === "busca"
+          ? `${link} <span title="Descoberto por busca web — confira se é o perfil certo" style="cursor:help">⚠️</span>`
+          : link;
+      })
       .join("<br>");
+  }
   if (type === "emails")
     return String(v)
       .split(" | ")
@@ -354,9 +362,11 @@ function runJob(url, { startMsg, progressMsg, doneMsg }) {
 
   jobES.addEventListener("done", (e) => {
     const d = JSON.parse(e.data);
-    // Atualiza o comSite de cada busca com os dados enriquecidos.
+    // Atualiza o comSite/semSite de cada busca com os dados enriquecidos.
     if (Array.isArray(d.comSitePerBusca))
       d.comSitePerBusca.forEach((cs, i) => { if (state.buscas[i]) state.buscas[i].comSite = cs; });
+    if (Array.isArray(d.semSitePerBusca))
+      d.semSitePerBusca.forEach((ss, i) => { if (state.buscas[i]) state.buscas[i].semSite = ss; });
     renderCurrent();
     $("enrichStatus").textContent = doneMsg(d);
     setBar("enrichBar", "enrichFill", 100);
@@ -420,6 +430,28 @@ function emailScrape() {
       if (d.semEmail) partes.push(`${d.semEmail} sem e-mail`);
       if (d.falhas) partes.push(`${d.falhas} falharam`);
       return `✅ ${partes.join(", ")} (veja a coluna E-mails).`;
+    },
+  });
+}
+
+function socialScrape() {
+  const params = new URLSearchParams({ conc: parseInt($("conc").value, 10) || 6 });
+  // Fallback com navegador (sites JS) e busca web (descoberta) — opcionais.
+  if (!$("renderJs").checked) params.set("render", "0");
+  if ($("searchSocials").checked) params.set("search", "1");
+  runJob(`/api/socials/${state.id}?${params}`, {
+    startMsg: "Procurando redes sociais (site + páginas de contato)...",
+    progressMsg: (p) => {
+      const rotulo =
+        p.fase === "navegador" ? "Renderizando (sites JS)" : p.fase === "busca" ? "Buscando na web" : "Redes";
+      return `${rotulo} ${p.current}/${p.total}: ${p.nome}` + (p.encontrados ? ` (${p.encontrados})` : "");
+    },
+    doneMsg: (d) => {
+      const partes = [`${d.ok} com rede social`];
+      if (d.viaBusca) partes.push(`${d.viaBusca} via busca web`);
+      if (d.semRedes) partes.push(`${d.semRedes} sem rede`);
+      if (d.falhas) partes.push(`${d.falhas} falharam`);
+      return `✅ ${partes.join(", ")} (veja a coluna Redes).`;
     },
   });
 }
@@ -619,6 +651,7 @@ $("go").addEventListener("click", start);
 $("enrich").addEventListener("click", enrich);
 $("sitetext").addEventListener("click", sitetext);
 $("emailScrape").addEventListener("click", emailScrape);
+$("socialScrape").addEventListener("click", socialScrape);
 $("exportZip").addEventListener("click", openExportModal);
 $("buscaSel").addEventListener("change", (e) => {
   state.current = parseInt(e.target.value, 10) || 0;

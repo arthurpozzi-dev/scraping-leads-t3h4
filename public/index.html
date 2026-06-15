@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Maps Leads Scraper · T3H4</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -57,8 +58,12 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
           <span class="check"><input id="deep" type="checkbox" checked /> Abrir cada local</span>
         </div>
         <div style="flex: 0 0 auto;">
-          <label title="No botão Enriquecer e-mails: abre um navegador real só para os sites que ficaram sem e-mail (sites feitos em JavaScript). Mais lento, porém pega mais.">Fallback de e-mails</label>
+          <label title="Nos botões Enriquecer e-mails / Buscar redes sociais: abre um navegador real só para os sites que ficaram sem resultado (sites feitos em JavaScript). Mais lento, porém pega mais.">Fallback (sites JS)</label>
           <span class="check"><input id="renderJs" type="checkbox" checked /> Renderizar sites JS</span>
+        </div>
+        <div style="flex: 0 0 auto;">
+          <label title="No botão Buscar redes sociais: para leads sem rede (com ou sem site), pesquisa o nome num buscador para descobrir o perfil. Mais lento e pode trazer o perfil errado.">Redes via busca web</label>
+          <span class="check"><input id="searchSocials" type="checkbox" /> Buscar quem não tem</span>
         </div>
         <div style="flex: 0 0 auto;">
           <button id="go">Buscar leads</button>
@@ -76,6 +81,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
         <button id="enrich">⚡ Enriquecer sites (Core Web Vitals)</button>
         <button id="sitetext">🔤 Puxar texto dos sites</button>
         <button id="emailScrape">📧 Enriquecer e-mails</button>
+        <button id="socialScrape">🔗 Buscar redes sociais</button>
         <button id="exportZip">📦 Exportar…</button>
       </div>
       <div class="status" id="enrichStatus"></div>

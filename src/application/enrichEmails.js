@@ -15,6 +15,7 @@
  * acrescenta, nunca perde, contatos. Erros por item são tolerados: o lead
  * mantém o que tinha e o motivo vai para `site_emails_erro`.
  */
+import { mergeSocialLinks, recordSocialSources } from "../domain/classification.js";
 import { runPool } from "./concurrentPool.js";
 
 const DEFAULT_CONCURRENCY = 6;
@@ -50,9 +51,18 @@ export async function enrichEmails(comSite = [], emailScraper, onProgress, optio
     concurrency: options.concurrency || DEFAULT_CONCURRENCY,
     task: async (lead) => {
       try {
-        const { emails } = await emailScraper.scrapeEmails(lead.site);
+        // Mesmo download serve aos dois: e-mails e redes sociais (reuso interno).
+        const { emails, socials } = await emailScraper.scrapeContacts(lead.site);
         const merged = mergeEmails(lead.site_emails, emails);
-        return { ...lead, site_emails: merged.join(" | "), site_emails_erro: "" };
+        const antesRedes = lead.redes_sociais || "";
+        const redes = mergeSocialLinks(antesRedes, socials);
+        return {
+          ...lead,
+          site_emails: merged.join(" | "),
+          redes_sociais: redes,
+          redes_fontes: recordSocialSources(lead.redes_fontes, antesRedes, redes, "site"),
+          site_emails_erro: "",
+        };
       } catch (e) {
         return { ...lead, site_emails_erro: e?.message || "falha" };
       }
@@ -80,12 +90,18 @@ export async function enrichEmails(comSite = [], emailScraper, onProgress, optio
         concurrency: options.browserConcurrency || DEFAULT_BROWSER_CONCURRENCY,
         task: async ({ lead, i }) => {
           try {
-            const { emails } = await browserScraper.scrapeEmails(lead.site);
+            const { emails, socials } = await browserScraper.scrapeContacts(lead.site);
             const merged = mergeEmails(lead.site_emails, emails);
+            const antesRedes = lead.redes_sociais || "";
+            const redes = mergeSocialLinks(antesRedes, socials);
+            const fontes = recordSocialSources(lead.redes_fontes, antesRedes, redes, "navegador");
             if (merged.length) {
               renderizados++;
               // Achou via navegador: limpa o erro do fetch (o site existe, só era JS).
-              leads[i] = { ...lead, site_emails: merged.join(" | "), site_emails_erro: "" };
+              leads[i] = { ...lead, site_emails: merged.join(" | "), redes_sociais: redes, redes_fontes: fontes, site_emails_erro: "" };
+            } else if (redes !== antesRedes) {
+              // Sem e-mail novo, mas achou rede social: ainda vale guardar.
+              leads[i] = { ...lead, redes_sociais: redes, redes_fontes: fontes };
             }
           } catch {
             /* nem o navegador resolveu: mantém o estado da fase 1 */

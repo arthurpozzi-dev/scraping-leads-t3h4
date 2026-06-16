@@ -12,8 +12,9 @@ import ptBR from "./pt-BR.js";
 import enUS from "./en-US.js";
 import ptPT from "./pt-PT.js";
 import es from "./es.js";
+import deDE from "./de-DE.js";
 
-const LOCALES = { "pt-BR": ptBR, "en-US": enUS, "pt-PT": ptPT, es };
+const LOCALES = { "pt-BR": ptBR, "en-US": enUS, "pt-PT": ptPT, es, "de-DE": deDE };
 
 export const DEFAULT_LOCALE = "pt-BR";
 export const SUPPORTED_LOCALES = Object.keys(LOCALES);

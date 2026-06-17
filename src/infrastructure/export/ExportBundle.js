@@ -144,11 +144,13 @@ export class ExportBundle {
           if (pdf) {
             folder.file(`${reportsDir}/${base}.pdf`, pdf);
             if (!ref) ref = `${reportsDir}/${base}.pdf`;
-          } else if (!ref) {
-            // Fallback: grava o HTML para não perder o relatório deste lead.
+          } else if (wantHtml) {
+            // PDF falhou mas "HTML + PDF" foi pedido → fallback para HTML é aceitável.
             folder.file(`${reportsDir}/${base}.html`, html);
-            ref = `${reportsDir}/${base}.html`;
+            if (!ref) ref = `${reportsDir}/${base}.html`;
           }
+          // Se reports === "pdf" (exclusivo) e o PDF falhou, este lead fica sem
+          // arquivo de relatório — não geramos HTML silenciosamente no lugar do PDF.
         }
         totalReports++;
         out.push({ ...lead, relatorio_arquivo: ref });

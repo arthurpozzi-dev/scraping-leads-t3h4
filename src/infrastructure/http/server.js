@@ -30,6 +30,7 @@ import { enrichEmails } from "../../application/enrichEmails.js";
 import { enrichSocials } from "../../application/enrichSocials.js";
 import { PageSpeedClient } from "../pagespeed/PageSpeedClient.js";
 import { buildEnrichClients } from "./enrichClients.js";
+import { ensureFullReport } from "../../application/ensureFullReport.js";
 import { toCSV } from "../export/csvExporter.js";
 import { toXLSX } from "../export/xlsxExporter.js";
 import { columnsFor } from "../export/columns.js";
@@ -413,14 +414,26 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
   });
 
   // ---- Relatório persuasivo de 1 lead (busca b, índice i) ---------------
-  app.get("/api/report/:id/lead/:b/:i.html", (req, res) => {
+  app.get("/api/report/:id/lead/:b/:i.html", async (req, res) => {
     const item = store.get(req.params.id);
     if (!item) return res.status(404).send("Resultado expirado. Faça uma nova busca.");
     const busca = item.buscas[parseInt(req.params.b, 10)];
     const lead = busca?.comSite[parseInt(req.params.i, 10)];
     if (!lead) return res.status(404).send("Lead não encontrado.");
-    if (!lead.cwv_report)
-      return res.status(409).send("Enriqueça os sites (Core Web Vitals) antes de gerar o relatório.");
+    // Modo rápido (CrUX) deixa cwv_report null: gera o Lighthouse completo agora.
+    if (!lead.cwv_report) {
+      if (!lead.site)
+        return res.status(409).send("Enriqueça os sites (Core Web Vitals) antes de gerar o relatório.");
+      try {
+        const apiKey = (req.query.key || "").toString().trim();
+        const { pageSpeed } = buildEnrichClients({ apiKey, deep: true });
+        await ensureFullReport(lead, pageSpeed);
+      } catch (e) {
+        return res
+          .status(409)
+          .send("Não foi possível analisar o site para o relatório: " + (e?.message || "falha") + ".");
+      }
+    }
     const locale = SUPPORTED_LOCALES.includes(req.query.lang) ? req.query.lang : DEFAULT_LOCALE;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(reportRenderer.render(lead, { locale }));

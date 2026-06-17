@@ -10,72 +10,11 @@
  * `data-item-id`…) podem precisar de ajuste se a coleta parar de funcionar.
  */
 import { chromium } from "playwright";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { SOCIAL_DOMAINS } from "../../domain/classification.js";
-
-/** Caminhos comuns do Chromium/Chrome em Linux, em ordem de preferência. */
-const LINUX_CHROMIUM_PATHS = [
-  "/usr/bin/chromium-browser",
-  "/usr/bin/chromium",
-  "/snap/bin/chromium",
-  "/usr/bin/google-chrome",
-  "/usr/bin/google-chrome-stable",
-];
-
-// Libs do sistema que o Chromium precisa (libnss3, libnspr4, libasound2…), quando
-// extraídas localmente sem root (`.chromium-libs/`, ver README). Se a pasta existir,
-// adicionamos ao LD_LIBRARY_PATH do processo do navegador. Em servidores onde as libs
-// estão instaladas via apt, a pasta não existe e isto é um no-op.
-const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const LOCAL_CHROMIUM_LIBS = join(PROJECT_ROOT, ".chromium-libs", "extracted", "usr", "lib", "x86_64-linux-gnu");
-
-/** Env do navegador com as libs locais no LD_LIBRARY_PATH, se existirem; senão undefined. */
-function browserEnv() {
-  if (process.platform === "win32" || !existsSync(LOCAL_CHROMIUM_LIBS)) return undefined;
-  const prev = process.env.LD_LIBRARY_PATH || "";
-  return { ...process.env, LD_LIBRARY_PATH: prev ? `${LOCAL_CHROMIUM_LIBS}:${prev}` : LOCAL_CHROMIUM_LIBS };
-}
-
-/**
- * Monta as opções de launch do Chromium conforme o sistema operacional.
- *
- * - Windows: usa o Chromium que vem com o Playwright, como antes.
- * - Linux (servidor/WSL/container): usa o Chromium do sistema
- *   (`/usr/bin/chromium-browser` por padrão, ou o que existir, ou a env
- *   CHROMIUM_PATH) e adiciona as flags de sandbox necessárias para rodar sem
- *   privilégios (`--no-sandbox`), como num ambiente sandbox/CI.
- *
- * @param {boolean} headless
- * @returns {import("playwright").LaunchOptions}
- */
-export function buildLaunchOptions(headless) {
-  if (process.platform === "win32") {
-    return { headless };
-  }
-
-  // Linux (e outros não-Windows): prioriza CHROMIUM_PATH, depois os caminhos conhecidos.
-  const fromEnv = (process.env.CHROMIUM_PATH || "").trim();
-  const env = browserEnv();
-  // Valores especiais forçam o Chromium do próprio Playwright (sem executablePath).
-  // Útil quando o único Chromium do sistema é um *snap* (ex.: WSL/Ubuntu), que não
-  // funciona com o Playwright. Rode antes: `npx playwright install chromium`.
-  if (["playwright", "bundled", "0"].includes(fromEnv.toLowerCase())) {
-    return { headless, ...(env ? { env } : {}), args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] };
-  }
-  const executablePath =
-    (fromEnv && existsSync(fromEnv) ? fromEnv : "") ||
-    LINUX_CHROMIUM_PATHS.find((p) => existsSync(p)) ||
-    undefined; // undefined => cai no Chromium do Playwright, se houver
-
-  return {
-    headless,
-    ...(executablePath ? { executablePath } : {}),
-    ...(env ? { env } : {}),
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  };
-}
+// buildLaunchOptions foi movido para engine/launchOptions.js; re-exportado aqui
+// para não quebrar importadores existentes (PdfRenderer, BrowserEmailScraper).
+import { buildLaunchOptions } from "../engine/launchOptions.js";
+export { buildLaunchOptions };
 
 /**
  * Normaliza a entrada do usuário: aceita um link completo do Google Maps OU um

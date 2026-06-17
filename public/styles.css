@@ -186,6 +186,10 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
   background: var(--bg-grid); border: 1px solid var(--line); border-radius: var(--r-sm);
 }
 .toggle-card input { margin-top: 1px; }
+.toggle-card input[type="radio"] { accent-color: var(--acc); cursor: pointer; }
+.toggle-card:has(input[type="radio"]:checked) { border-color: var(--acc); }
+.toggle-card.is-disabled { opacity: .5; }
+.toggle-card.is-disabled input { cursor: not-allowed; }
 .toggle-card .t-title { font-size: 13.5px; color: var(--txt); font-weight: 500; }
 .toggle-card .t-desc { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
 

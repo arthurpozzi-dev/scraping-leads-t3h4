@@ -1,0 +1,32 @@
+# Frota Lighthouse escalável atrás de um balanceador nginx (URL única).
+#
+#   cd lighthouse-server
+#   docker compose up --build --scale lighthouse=4
+#
+# No app, aponte para o balanceador (uma URL só, mesmo com N réplicas):
+#   LIGHTHOUSE_SERVER_URL=http://localhost:3001
+#
+# Cada réplica roda LH_CONCURRENCY medições em paralelo; o nginx distribui as
+# requisições entre as réplicas (round-robin via DNS do Docker).
+
+services:
+  lighthouse:
+    build:
+      context: ..
+      dockerfile: lighthouse-server/Dockerfile
+    environment:
+      LH_PORT: "3001"
+      LH_CONCURRENCY: "2"
+    expose:
+      - "3001"
+    restart: unless-stopped
+
+  lighthouse-lb:
+    image: nginx:alpine
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - lighthouse
+    restart: unless-stopped

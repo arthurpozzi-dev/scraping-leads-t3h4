@@ -106,7 +106,8 @@ export class PageSpeedClient {
   /**
    * @param {Object} [options]
    * @param {string} [options.apiKey]   chave da API (sobrepõe a env)
-   * @param {string} [options.baseUrl]  URL base da instância self-hosted (substitui o endpoint do Google)
+   * @param {string} [options.baseUrl]  URL(s) da instância self-hosted (substitui o endpoint do Google).
+   *                                    Aceita VÁRIAS separadas por vírgula — o cliente faz round-robin entre elas.
    * @param {"mobile"|"desktop"} [options.strategy="mobile"]
    * @param {number} [options.timeoutMs=45000]   timeout por tentativa
    * @param {number} [options.maxRetries=1]       tentativas extras em falha transitória
@@ -115,12 +116,23 @@ export class PageSpeedClient {
    */
   constructor({ apiKey, baseUrl, strategy = "mobile", timeoutMs = 45000, maxRetries = 1, categories = ["performance"], fetchImpl } = {}) {
     this.apiKey = apiKey || process.env.PAGESPEED_API_KEY || "";
-    this.baseUrl = baseUrl || "";
+    // Uma ou mais instâncias self-hosted (round-robin). Vazio => endpoint do Google.
+    this.baseUrls = (baseUrl || "")
+      .split(",")
+      .map((u) => u.trim())
+      .filter(Boolean);
+    this._rr = 0;
     this.strategy = strategy;
     this.timeoutMs = timeoutMs;
     this.maxRetries = maxRetries;
     this.categories = categories;
     this._fetch = fetchImpl || globalThis.fetch;
+  }
+
+  /** Próximo endpoint: alterna entre as instâncias self-hosted, ou o Google se não houver. */
+  _nextEndpoint() {
+    if (!this.baseUrls.length) return ENDPOINT;
+    return this.baseUrls[this._rr++ % this.baseUrls.length];
   }
 
   /** Uma única tentativa de medição. */
@@ -132,7 +144,7 @@ export class PageSpeedClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const endpoint = this.baseUrl || ENDPOINT;
+      const endpoint = this._nextEndpoint();
       const res = await this._fetch(`${endpoint}?${params}`, { signal: controller.signal });
       if (!res.ok) {
         const body = await res.text().catch(() => "");

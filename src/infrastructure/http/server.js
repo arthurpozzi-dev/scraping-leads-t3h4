@@ -123,6 +123,21 @@ const totalComSite = (buscas) => buscas.reduce((s, b) => s + b.comSite.length, 0
  * @param {import("../scraper/SocialSearchScraper.js").SocialSearchScraper} [deps.socialSearchScraper] descoberta de redes por busca web (opt-in)
  * @returns {import("express").Express}
  */
+/**
+ * Resolve a URL da instância Lighthouse a partir da escolha da UI (`lhSource`):
+ *  - "google" -> "" (força o PageSpeed do Google, sem cair na env do sistema)
+ *  - "system" -> a instância self-hosted configurada no servidor (LIGHTHOUSE_SERVER_URL)
+ *  - "custom" -> a URL informada no campo da interface (lighthouseUrl)
+ * Sem `lhSource` (chamadas legadas): usa o lighthouseUrl da query, com fallback para a env.
+ */
+function resolveLighthouseUrl(req) {
+  const source = (req.query.lhSource || "").toString().trim();
+  if (source === "google") return "";
+  if (source === "system") return (process.env.LIGHTHOUSE_SERVER_URL || "").trim();
+  if (source === "custom") return (req.query.lighthouseUrl || "").toString().trim();
+  return (req.query.lighthouseUrl || process.env.LIGHTHOUSE_SERVER_URL || "").toString().trim();
+}
+
 export function createServer({ scraper, gridScraper, siteTextScraper, emailScraper, makeBrowserEmailScraper, makePdfRenderer, reportRenderer, exportBundle, siteHealthChecker, socialSearchScraper, engines }) {
   /** Resolve o engine de scraping a partir dos parâmetros da requisição. */
   const resolveEngine = (req) =>
@@ -140,6 +155,18 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
     const now = Date.now();
     for (const [id, v] of store) if (now - v.ts > 3600_000) store.delete(id);
   }, 600_000).unref();
+
+  // ---- Config da UI (capacidades do servidor) ---------------------------
+  app.get("/api/config", (_req, res) => {
+    res.json({
+      // Quantas instâncias Lighthouse self-hosted o servidor conhece (env), p/ o
+      // front habilitar/avisar a opção "Self-Hosted do Sistema".
+      lighthouseInstances: (process.env.LIGHTHOUSE_SERVER_URL || "")
+        .split(",")
+        .map((u) => u.trim())
+        .filter(Boolean).length,
+    });
+  });
 
   // ---- Coleta + pipeline (N buscas) -------------------------------------
   app.get("/api/scrape", async (req, res) => {
@@ -255,7 +282,11 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
       return res.end();
     }
     const apiKey = (req.query.key || "").toString().trim();
-    const lighthouseUrl = (req.query.lighthouseUrl || process.env.LIGHTHOUSE_SERVER_URL || "").toString().trim();
+    const lighthouseUrl = resolveLighthouseUrl(req);
+    if ((req.query.lhSource || "").toString().trim() === "custom" && !lighthouseUrl) {
+      send("error", { message: "Informe a URL da instância Lighthouse (ou troque a fonte da análise)." });
+      return res.end();
+    }
     const deep = req.query.deep === "1";
     const { pageSpeed: client, crux } = buildEnrichClients({ apiKey, deep, lighthouseUrl });
     const cache = cacheFor(item);
@@ -464,7 +495,10 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
         return res.status(409).send("Enriqueça os sites (Core Web Vitals) antes de gerar o relatório.");
       try {
         const apiKey = (req.query.key || "").toString().trim();
-        const lighthouseUrl = (req.query.lighthouseUrl || process.env.LIGHTHOUSE_SERVER_URL || "").toString().trim();
+        const lighthouseUrl = resolveLighthouseUrl(req);
+        if ((req.query.lhSource || "").toString().trim() === "custom" && !lighthouseUrl) {
+          return res.status(400).send("Informe a URL da instância Lighthouse (ou troque a fonte da análise).");
+        }
         const { pageSpeed } = buildEnrichClients({ apiKey, deep: true, lighthouseUrl });
         await ensureFullReport(lead, pageSpeed, cacheFor(item).cwv);
       } catch (e) {

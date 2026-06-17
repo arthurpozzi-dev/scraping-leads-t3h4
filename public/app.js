@@ -17,6 +17,17 @@ function addEngine(params) {
   return params;
 }
 
+/**
+ * Anexa a fonte da análise de laboratório (Lighthouse) aos params: google |
+ * system | custom. Só envia a URL quando "Outro servidor" está selecionado.
+ */
+function addLighthouse(params) {
+  const source = document.querySelector('input[name="lhSource"]:checked')?.value || "google";
+  params.set("lhSource", source);
+  if (source === "custom") params.set("lighthouseUrl", $("lighthouseUrl").value.trim());
+  return params;
+}
+
 // Colunas exibidas em cada tabela: [chave, rótulo, tipoOpcional].
 const COLS_COM = [
   ["nome", "Nome"], ["categoria", "Categoria"], ["nota", "Nota"],
@@ -109,7 +120,8 @@ function renderCell(value, type, row) {
 /** Abre, em nova aba, o relatório de auditoria persuasivo de um lead (busca atual). */
 function openSalesReport(index) {
   if (!state.id || index === "") return;
-  window.open(`/api/report/${state.id}/lead/${state.current}/${index}.html`, "_blank", "noopener");
+  const params = addLighthouse(new URLSearchParams());
+  window.open(`/api/report/${state.id}/lead/${state.current}/${index}.html?${params}`, "_blank", "noopener");
 }
 window.openSalesReport = openSalesReport;
 
@@ -421,12 +433,18 @@ function runJob(url, { startMsg, progressMsg, doneMsg }) {
 
 function enrich() {
   const deep = $("deepCwv").checked;
+  // "Outro servidor" sem URL cairia silenciosamente no Google — bloqueia antes.
+  const lhSource = document.querySelector('input[name="lhSource"]:checked')?.value || "google";
+  if (lhSource === "custom" && !$("lighthouseUrl").value.trim()) {
+    $("enrichStatus").textContent = "❌ Informe a URL da instância Lighthouse (ou troque a fonte da análise).";
+    return;
+  }
   const params = new URLSearchParams({
     key: $("key").value.trim(),
     conc: parseInt($("conc").value, 10) || 12,
-    lighthouseUrl: $("lighthouseUrl").value.trim(),
   });
   if (deep) params.set("deep", "1");
+  addLighthouse(params);
   addEngine(params);
   runJob(`/api/enrich/${state.id}?${params}`, {
     startMsg: deep ? "Analisando sites (Lighthouse completo)..." : "Analisando sites (modo rápido: CrUX + performance)...",
@@ -721,6 +739,42 @@ function syncEngine() {
 }
 $("engine").addEventListener("change", syncEngine);
 syncEngine();
+
+// Mostra o campo de URL só quando a fonte do Lighthouse é "Outro servidor".
+function syncLhSource() {
+  const custom = document.querySelector('input[name="lhSource"]:checked')?.value === "custom";
+  $("lighthouseUrlWrap").style.display = custom ? "" : "none";
+}
+document.querySelectorAll('input[name="lhSource"]').forEach((r) =>
+  r.addEventListener("change", syncLhSource)
+);
+syncLhSource();
+
+// "Self-Hosted do Sistema" só faz sentido se o servidor tiver LIGHTHOUSE_SERVER_URL.
+// Sem instâncias, desabilita a opção e avisa (cairia silenciosamente no Google).
+fetch("/api/config")
+  .then((r) => r.json())
+  .then((cfg) => {
+    const sys = document.querySelector('input[name="lhSource"][value="system"]');
+    const card = sys?.closest(".toggle-card");
+    const desc = card?.querySelector(".t-desc");
+    const n = cfg.lighthouseInstances || 0;
+    if (n > 0) {
+      if (desc) desc.textContent = `Usa a(s) ${n} instância(s) Lighthouse configurada(s) no servidor.`;
+      return;
+    }
+    if (sys) sys.disabled = true;
+    card?.classList.add("is-disabled");
+    if (desc) desc.textContent = "Nenhuma instância no servidor (defina LIGHTHOUSE_SERVER_URL).";
+    if (sys?.checked) {
+      const google = document.querySelector('input[name="lhSource"][value="google"]');
+      if (google) {
+        google.checked = true;
+        syncLhSource();
+      }
+    }
+  })
+  .catch(() => {});
 
 $("go").addEventListener("click", start);
 $("enrich").addEventListener("click", enrich);

@@ -7,14 +7,18 @@
     "prestart": "node -e \"console.log('\\n  Iniciando o servidor... (a primeira carga pode levar alguns segundos)\\n')\"",
     "start": "node src/main.js",
     "grid": "node scripts/gridScrape.js",
+    "lighthouse": "node lighthouse-server/server.js",
+    "lighthouse:fleet": "node scripts/lighthouseFleet.js",
     "test": "node --test",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {
+    "chrome-launcher": "^1.2.1",
     "cloakbrowser": "^0.3.31",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "jszip": "^3.10.1",
+    "lighthouse": "^12.8.2",
     "playwright": "^1.61.0",
     "playwright-core": "^1.61.0"
   }

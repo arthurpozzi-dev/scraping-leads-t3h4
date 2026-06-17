@@ -16,6 +16,8 @@
  */
 import { mergeSocialLinks, recordSocialSources } from "../domain/classification.js";
 import { runPool } from "./concurrentPool.js";
+import { cacheKey } from "./jobCache.js";
+import { buildQueryTerms } from "../infrastructure/scraper/SocialSearchScraper.js";
 
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_BROWSER_CONCURRENCY = 2;
@@ -36,6 +38,15 @@ export async function enrichSocials(busca = {}, scrapers = {}, onProgress, optio
   const comSite = [...(busca.comSite || [])];
   const semSite = [...(busca.semSite || [])];
 
+  const pageCache = options.pageCache;
+  const searchCache = options.searchCache;
+  const scrapeContacts = (url) =>
+    pageCache ? pageCache.run(cacheKey(url), () => emailScraper.scrapeContacts(url)) : emailScraper.scrapeContacts(url);
+  const searchSocial = (lead) => {
+    if (!searchCache) return socialSearchScraper.search(lead);
+    return searchCache.run(buildQueryTerms(lead).toLowerCase(), () => socialSearchScraper.search(lead));
+  };
+
   // ---- Fase 1: extrai do HTML do próprio site (lista "com site") ----------
   const total = comSite.length;
   let done = 0;
@@ -43,7 +54,7 @@ export async function enrichSocials(busca = {}, scrapers = {}, onProgress, optio
     concurrency: options.concurrency || DEFAULT_CONCURRENCY,
     task: async (lead) => {
       try {
-        const { socials } = await emailScraper.scrapeContacts(lead.site);
+        const { socials } = await scrapeContacts(lead.site);
         const antes = lead.redes_sociais || "";
         const merged = mergeSocialLinks(antes, socials);
         return { ...lead, redes_sociais: merged, redes_fontes: recordSocialSources(lead.redes_fontes, antes, merged, "site") };
@@ -102,7 +113,7 @@ export async function enrichSocials(busca = {}, scrapers = {}, onProgress, optio
         concurrency: options.searchConcurrency || DEFAULT_SEARCH_CONCURRENCY,
         task: async ({ lead, list, i }) => {
           try {
-            const socials = await socialSearchScraper.search(lead);
+            const socials = await searchSocial(lead);
             const antes = lead.redes_sociais || "";
             const merged = mergeSocialLinks(antes, socials);
             if (merged && merged !== antes) {

@@ -1,10 +1,23 @@
+/**
+ * Caso de uso: ENRIQUECIMENTO da lista "com site" com Core Web Vitals.
+ *
+ * Para cada lead com site próprio, consulta a performance do site através de um
+ * cliente injetado (porta `pageSpeedClient`) e preenche as colunas de relatório
+ * (score, status, métricas, categorias, oportunidades) — ver buildAuditReportModel
+ * para a nota de auditoria 0–10 derivada disso.
+ *
+ * Roda com paralelismo limitado (o PageSpeed é lento). Erros por item são
+ * tolerados — o lead recebe status "N/A" e o motivo em `cwv_erro`.
+ */
 import { classifyCwv } from "../domain/classification.js";
 import { buildAuditReportModel } from "./buildAuditReportModel.js";
 import { runPool } from "./concurrentPool.js";
 import { cacheKey } from "./jobCache.js";
 
+/** Quantos sites analisar ao mesmo tempo (padrão; configurável via opção). */
 const DEFAULT_CONCURRENCY = 8;
 
+/** Junta as principais oportunidades do relatório numa string para a planilha. */
 function joinOpportunities(report) {
   return (report.opportunities || [])
     .slice(0, 5)
@@ -57,6 +70,13 @@ function labFields(report, lead) {
   };
 }
 
+/**
+ * @param {import("../domain/Lead.js").Lead[]} comSite
+ * @param {{ analyze: (url:string)=>Promise<any> }} pageSpeedClient
+ * @param {(p: { current:number, total:number, nome:string, status:string, erro?:string }) => void} [onProgress]
+ * @param {{ concurrency?: number, healthChecker?: { check:(url:string)=>Promise<{down:boolean,reason?:string}>, cwvCache?: any } }} [options]
+ * @returns {Promise<{ leads: import("../domain/Lead.js").Lead[], ok: number, falhas: number, foraDoAr: number }>}
+ */
 export async function enrichLeads(comSite = [], pageSpeedClient, onProgress, options = {}) {
   let ok = 0;
   let falhas = 0;

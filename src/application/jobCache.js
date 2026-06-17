@@ -5,6 +5,10 @@
  * (falha não fica cacheada); sucesso permanece pelo tempo de vida do job.
  *
  * Escopo: um job (uma execução). Vive no store do servidor e some com o job.
+ *
+ * DESIGN TRADE-OFF: Leads do mesmo domínio compartilham o mesmo destino em caso de
+ * falha transiente — se a rede falhar, todos falham juntos (por design; o cache
+ * evicta em rejeição para permitir retry em reconexões posteriores).
  */
 
 /** Normaliza uma URL para servir de chave: protocolo, host minúsculo, sem barra/fragmento final. */

@@ -147,6 +147,13 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
             </div>
           </div>
 
+          <div class="row" style="margin-top: var(--s4);">
+            <div style="flex: 1 1 100%;">
+              <label for="lighthouseUrl">Instância Lighthouse (opcional — usa o PageSpeed do Google se vazio)<span class="help tip-start" tabindex="0" role="note" aria-label="URL de uma instância Lighthouse própria (self-hosted) compatível com o PageSpeed. Acelera a análise de laboratório por evitar a fila da API do Google. O CrUX (dado de campo) continua vindo do Google. Deixe vazio para usar o PageSpeed Insights." data-tip="URL de uma instância Lighthouse própria (self-hosted) compatível com o PageSpeed. Acelera o laboratório por evitar a fila do Google. O CrUX continua do Google. Vazio = PageSpeed Insights."></span></label>
+              <input id="lighthouseUrl" type="url" placeholder="https://lighthouse.seudominio.com" autocomplete="off" />
+            </div>
+          </div>
+
           <div class="toggle-grid" style="margin-top: var(--s4);">
             <label class="toggle-card">
               <input id="deepCwv" type="checkbox" />

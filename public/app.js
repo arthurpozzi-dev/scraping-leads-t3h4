@@ -424,6 +424,7 @@ function enrich() {
   const params = new URLSearchParams({
     key: $("key").value.trim(),
     conc: parseInt($("conc").value, 10) || 12,
+    lighthouseUrl: $("lighthouseUrl").value.trim(),
   });
   if (deep) params.set("deep", "1");
   addEngine(params);

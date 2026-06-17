@@ -18,7 +18,7 @@
  *
  * Reaproveita o Chromium já instalado pelo Playwright (não baixa outro Chrome).
  *
- * Variáveis de ambiente:
+ * Variáveis de ambiente (lidas do ambiente ou do .env da raiz do projeto):
  *   LH_PORT          porta HTTP do worker (padrão 3001)
  *   LH_CONCURRENCY   runs simultâneos (padrão = núcleos - 1)
  *   LH_CHROME_PATH    binário do Chrome (padrão: o Chromium do Playwright)
@@ -34,6 +34,14 @@ import lighthouse from "lighthouse";
 import * as chromeLauncher from "chrome-launcher";
 import { chromium } from "playwright";
 import { parseCategories, buildLhFlags } from "./lhFlags.js";
+
+// Carrega o .env da raiz (LH_CHROME_PATH, LH_USER_DATA_DIR, etc.). Variáveis já
+// definidas no ambiente (ex.: LH_PORT passado pela frota) têm precedência.
+try {
+  process.loadEnvFile?.();
+} catch {
+  /* sem .env: usa os defaults */
+}
 
 const PORT = Number(process.env.LH_PORT) || 3001;
 const MAX = Math.max(1, Number(process.env.LH_CONCURRENCY) || os.cpus().length - 1);

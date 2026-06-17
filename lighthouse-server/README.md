@@ -30,6 +30,10 @@ npm install   # na raiz do projeto
 
 ## Rodar
 
+> O worker lê o **`.env` da raiz** (assim como o app), então as variáveis abaixo
+> podem ficar no `.env` em vez de irem na linha de comando. Variáveis passadas no
+> ambiente têm precedência sobre o `.env` (a frota define `LH_PORT` por worker).
+
 ### 1 worker (dev)
 
 ```bash
@@ -42,6 +46,23 @@ No app (`.env`):
 ```
 LIGHTHOUSE_SERVER_URL=http://localhost:3001
 ```
+
+Depois de mexer no `.env`, **reinicie o app** (ele só lê o `.env` ao iniciar).
+
+### WSL / Chromium snap
+
+No WSL o Chromium do Playwright não roda standalone (faltam libs como `libnspr4`),
+e o Chromium snap não enxerga `/tmp`. Aponte o worker para o snap e dê um perfil
+dentro de `~/snap` (no `.env`):
+
+```
+LH_CHROME_PATH=/usr/bin/chromium-browser
+LH_USER_DATA_DIR=/home/<voce>/snap/chromium/common/lhrun
+LIGHTHOUSE_SERVER_URL=http://localhost:3001
+```
+
+Crie o diretório uma vez: `mkdir -p ~/snap/chromium/common/lhrun`. Em produção
+(Docker, abaixo) isso não é necessário — a imagem do Playwright já tem tudo.
 
 ### Frota local (várias instâncias, 1 máquina)
 

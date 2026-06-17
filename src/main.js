@@ -36,7 +36,8 @@ const gridScraper = new GoogleMapsGridScraper();
 const siteTextScraper = new SiteTextScraper();
 const emailScraper = new EmailScraper();
 // Fábrica: 1 navegador por requisição de e-mails (evita que uma req feche o da outra).
-const makeBrowserEmailScraper = () => new BrowserEmailScraper({ headless: true });
+// Recebe o engine escolhido (CloakBrowser anti-ban, etc.); sem engine, usa Playwright.
+const makeBrowserEmailScraper = (engine) => new BrowserEmailScraper({ headless: true, engine });
 const siteHealthChecker = new SiteHealthChecker();
 const socialSearchScraper = new SocialSearchScraper();
 const reportRenderer = new AuditReportRenderer();

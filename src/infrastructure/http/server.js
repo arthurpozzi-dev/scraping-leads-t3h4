@@ -31,6 +31,8 @@ import { enrichSocials } from "../../application/enrichSocials.js";
 import { PageSpeedClient } from "../pagespeed/PageSpeedClient.js";
 import { buildEnrichClients } from "./enrichClients.js";
 import { ensureFullReport } from "../../application/ensureFullReport.js";
+import { SiteTextScraper } from "../scraper/SiteTextScraper.js";
+import { EmailScraper } from "../scraper/EmailScraper.js";
 import { toCSV } from "../export/csvExporter.js";
 import { toXLSX } from "../export/xlsxExporter.js";
 import { columnsFor } from "../export/columns.js";
@@ -120,7 +122,12 @@ const totalComSite = (buscas) => buscas.reduce((s, b) => s + b.comSite.length, 0
  * @param {import("../scraper/SocialSearchScraper.js").SocialSearchScraper} [deps.socialSearchScraper] descoberta de redes por busca web (opt-in)
  * @returns {import("express").Express}
  */
-export function createServer({ scraper, gridScraper, siteTextScraper, emailScraper, makeBrowserEmailScraper, makePdfRenderer, reportRenderer, exportBundle, siteHealthChecker, socialSearchScraper }) {
+export function createServer({ scraper, gridScraper, siteTextScraper, emailScraper, makeBrowserEmailScraper, makePdfRenderer, reportRenderer, exportBundle, siteHealthChecker, socialSearchScraper, engines }) {
+  /** Resolve o engine de scraping a partir dos parâmetros da requisição. */
+  const resolveEngine = (req) =>
+    engines
+      ? engines.get(req.query.engine || "playwright", { mode: req.query.scraplingMode || "fast" })
+      : { name: "playwright", supportsBrowser: true };
   const app = express();
   app.use(express.json());
   app.use(express.static(PUBLIC_DIR));
@@ -184,6 +191,18 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
     }
     const gridCenter = isGrid ? parseCenter(req.query.center) : cityCenter;
 
+    // Engine selecionado. O deep-scrape interativo do Maps exige browser ao vivo;
+    // se o engine escolhido não fornece (Scrapling), degrada para Playwright na
+    // coleta e avisa — o engine escolhido segue valendo no enriquecimento.
+    const reqEngine = resolveEngine(req);
+    let scrapeEngine = reqEngine;
+    if (!isGrade && reqEngine && reqEngine.supportsBrowser === false) {
+      scrapeEngine = engines ? engines.get("playwright") : { name: "playwright", supportsBrowser: true };
+      send("progress", {
+        message: `Engine "${reqEngine.name}" não faz o scroll interativo do Maps — usando Playwright na coleta (o engine escolhido vale no enriquecimento).`,
+      });
+    }
+
     const buscas = [];
     try {
       for (let i = 0; i < inputs.length; i++) {
@@ -198,7 +217,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
           const onProgress = (p) => send("progress", { ...p, busca: i + 1, totalBuscas: inputs.length, query });
           const raw = isGrade
             ? await gridScraper.scrape({ keyword: query, center: gridCenter, areaSize, step, maxResults, onProgress })
-            : await scraper.scrape({ input: query, maxResults, deep, onProgress });
+            : await scraper.scrape({ input: query, maxResults, deep, onProgress, engine: scrapeEngine });
           const { comSite, semSite, stats } = runPipeline(raw, filterOptions);
           buscas.push({ query, comSite, semSite, stats });
         } catch (e) {
@@ -278,6 +297,8 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
     }
     const concurrency =
       parseInt(req.query.conc, 10) || parseInt(process.env.SITETEXT_CONCURRENCY, 10) || 8;
+    const engine = resolveEngine(req);
+    const sts = engine.name === "playwright" ? siteTextScraper : new SiteTextScraper({ engine });
 
     const total = totalComSite(item.buscas);
     let done = 0;
@@ -287,7 +308,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
       for (const b of item.buscas) {
         const r = await scrapeSiteTexts(
           b.comSite,
-          siteTextScraper,
+          sts,
           (p) => send("progress", { current: ++done, total, nome: p.nome, erro: p.erro, query: b.query }),
           { concurrency }
         );
@@ -314,9 +335,15 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
     }
     const concurrency =
       parseInt(req.query.conc, 10) || parseInt(process.env.EMAIL_CONCURRENCY, 10) || 6;
+    const engine = resolveEngine(req);
+    const es = engine.name === "playwright" ? emailScraper : new EmailScraper({ engine });
     // Fallback com navegador (sites JS): ligado por padrão, desligável com render=0.
+    // Usa o engine escolhido se ele fornece browser ao vivo (ex.: CloakBrowser anti-ban);
+    // senão (Scrapling) cai no Playwright para o fallback.
     const useBrowser = req.query.render !== "0" && typeof makeBrowserEmailScraper === "function";
-    const browserScraper = useBrowser ? makeBrowserEmailScraper() : null;
+    const browserScraper = useBrowser
+      ? makeBrowserEmailScraper(engine.supportsBrowser ? engine : undefined)
+      : null;
     const browserConcurrency =
       parseInt(req.query.bconc, 10) || parseInt(process.env.EMAIL_BROWSER_CONCURRENCY, 10) || 2;
 
@@ -331,7 +358,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
       for (const b of item.buscas) {
         const r = await enrichEmails(
           b.comSite,
-          emailScraper,
+          es,
           (p) => {
             if (p.erro) console.warn(`[emails] "${p.nome}": ${p.erro}`);
             sendProgress(p, b.query);
@@ -364,9 +391,13 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
     }
     const concurrency =
       parseInt(req.query.conc, 10) || parseInt(process.env.SOCIAL_CONCURRENCY, 10) || 6;
+    const engine = resolveEngine(req);
+    const es = engine.name === "playwright" ? emailScraper : new EmailScraper({ engine });
     // Fallback com navegador (sites JS): ligado por padrão, desligável com render=0.
     const useBrowser = req.query.render !== "0" && typeof makeBrowserEmailScraper === "function";
-    const browserScraper = useBrowser ? makeBrowserEmailScraper() : null;
+    const browserScraper = useBrowser
+      ? makeBrowserEmailScraper(engine.supportsBrowser ? engine : undefined)
+      : null;
     const browserConcurrency =
       parseInt(req.query.bconc, 10) || parseInt(process.env.EMAIL_BROWSER_CONCURRENCY, 10) || 2;
     // Busca web (descoberta para quem não tem rede): opt-in via search=1.
@@ -382,7 +413,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
       for (const b of item.buscas) {
         const r = await enrichSocials(
           { comSite: b.comSite, semSite: b.semSite },
-          { emailScraper, browserScraper, socialSearchScraper: useSearch ? socialSearchScraper : null },
+          { emailScraper: es, browserScraper, socialSearchScraper: useSearch ? socialSearchScraper : null },
           (p) => {
             if (p.erro) console.warn(`[socials] "${p.nome}": ${p.erro}`);
             sendProgress(p, b.query);

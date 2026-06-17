@@ -36,7 +36,7 @@
         </div>
       </div>
 
-      <label id="inputLabel" for="input">Links do Google Maps ou termos de busca — um por linha</label>
+      <label id="inputLabel" for="input">Links do Google Maps ou termos de busca — um por linha<span class="help tip-start" tabindex="0" role="note" aria-label="Cole um por linha: um link de busca do Google Maps (a URL depois de pesquisar) ou um termo como 'dentistas em Campinas'. Cada linha vira uma busca separada." data-tip="Cole um por linha: um link de busca do Google Maps (a URL depois de pesquisar) ou um termo como “dentistas em Campinas”. Cada linha vira uma busca separada."></span></label>
       <textarea id="input" rows="3"
         placeholder="restaurantes em São Carlos
 dentistas em Ribeirão Preto
@@ -45,7 +45,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       <!-- Modo + engine -->
       <div class="row">
         <div style="flex: 1 1 320px;">
-          <label for="mode">Modo de busca</label>
+          <label for="mode">Modo de busca<span class="help tip-start" tabindex="0" role="note" aria-label="Normal: navega no Maps, até ~120 resultados. Grade (coordenadas ou cidade): varre uma área em células para ultrapassar o limite de 120. Use grade quando precisar de muitos leads numa região." data-tip="Normal: navega no Maps, até ~120 resultados por busca. Grade (coordenadas ou cidade): varre uma área em células para ultrapassar o limite de 120 — use quando precisar de muitos leads numa região."></span></label>
           <select id="mode">
             <option value="normal">Normal (navegador) — links ou termos, até ~120 por busca</option>
             <option value="grid">Grade — coordenadas (lat,lng) — sem limite de ~120</option>
@@ -53,7 +53,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
           </select>
         </div>
         <div style="flex: 1 1 220px;">
-          <label for="engine">Engine</label>
+          <label for="engine">Engine<span class="help" tabindex="0" role="note" aria-label="Como a ferramenta acessa a web. Playwright: padrão, já instalado. CloakBrowser: anti-ban (passa Cloudflare/FingerprintJS). Scrapling: fetch rápido ou stealth. CloakBrowser e Scrapling exigem instalação (ver README)." data-tip="Como a ferramenta acessa a web. Playwright: padrão, já instalado. CloakBrowser: anti-ban (passa Cloudflare/FingerprintJS). Scrapling: fetch rápido/stealth. Cloak e Scrapling exigem instalação (ver README)."></span></label>
           <select id="engine">
             <option value="playwright">Playwright (padrão)</option>
             <option value="cloakbrowser">CloakBrowser (anti-ban / Cloudflare)</option>
@@ -61,7 +61,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
           </select>
         </div>
         <div id="scraplingModeWrap" style="flex: 0 0 200px; display:none;">
-          <label for="scraplingMode">Modo Scrapling</label>
+          <label for="scraplingMode">Modo Scrapling<span class="help tip-end" tabindex="0" role="note" aria-label="fast: HTTP com impersonação de TLS, o mais rápido. dynamic: navegador completo (Playwright). stealth: Camoufox, resolve Cloudflare. Comece no fast e só suba se o site bloquear." data-tip="fast: HTTP com impersonação de TLS (o mais rápido). dynamic: navegador completo. stealth: Camoufox, resolve Cloudflare. Comece no fast e suba se o site bloquear."></span></label>
           <select id="scraplingMode">
             <option value="fast">fast (HTTP/TLS)</option>
             <option value="dynamic">dynamic (browser)</option>
@@ -78,15 +78,15 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       <!-- Opções do modo grade por coordenadas -->
       <div class="row" id="gridOpts" style="display:none;">
         <div style="flex: 2 1 320px;">
-          <label for="center">Localização — lat,lng ou link do Maps com @lat,lng</label>
+          <label for="center">Localização — lat,lng ou link do Maps com @lat,lng<span class="help tip-start" tabindex="0" role="note" aria-label="Centro da grade. Cole coordenadas no formato lat,lng (ex.: -22.0175,-47.8908) ou um link do Maps que contenha @lat,lng,zoom na URL." data-tip="Centro da grade. Cole coordenadas lat,lng (ex.: -22.0175,-47.8908) ou um link do Maps que contenha @lat,lng,zoom na URL."></span></label>
           <input id="center" type="text" placeholder="-22.0175,-47.8908   ou   https://maps.google.com/@-22.01,-47.89,13z" />
         </div>
         <div style="flex: 0 0 130px;">
-          <label for="area" title="Raio em graus. 0.05° ≈ 5,5 km.">Raio (graus)</label>
+          <label for="area">Raio (graus)<span class="help" tabindex="0" role="note" aria-label="Tamanho da área varrida, em graus. 0.05° equivale a cerca de 5,5 km de raio. Maior cobre mais cidade." data-tip="Tamanho da área varrida, em graus. 0.05° ≈ 5,5 km de raio. Maior cobre mais cidade."></span></label>
           <input id="area" type="number" min="0.01" step="0.01" value="0.05" />
         </div>
         <div style="flex: 0 0 130px;">
-          <label for="step" title="Passo da grade. 0.04° ≈ 4 km. Menor = mais cobertura, mais lento.">Passo (graus)</label>
+          <label for="step">Passo (graus)<span class="help tip-end" tabindex="0" role="note" aria-label="Distância entre os pontos da grade, em graus. 0.04° equivale a cerca de 4 km. Menor gera mais células: mais cobertura, porém mais lento." data-tip="Distância entre os pontos da grade, em graus. 0.04° ≈ 4 km. Menor = mais células: mais cobertura, porém mais lento."></span></label>
           <input id="step" type="number" min="0.01" step="0.01" value="0.04" />
         </div>
       </div>
@@ -94,15 +94,15 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       <!-- Opções do modo grade por cidade -->
       <div class="row" id="cityOpts" style="display:none;">
         <div style="flex: 2 1 320px;">
-          <label for="cityName">Nome da cidade (geocodificado automaticamente)</label>
+          <label for="cityName">Nome da cidade (geocodificado automaticamente)<span class="help tip-start" tabindex="0" role="note" aria-label="Digite a cidade (ex.: 'Ribeirão Preto' ou 'São Paulo, SP'). Ela é convertida automaticamente em coordenadas para o centro da grade." data-tip="Digite a cidade (ex.: “Ribeirão Preto” ou “São Paulo, SP”). É convertida automaticamente em coordenadas para o centro da grade."></span></label>
           <input id="cityName" type="text" placeholder="São Paulo, SP   ou   Ribeirão Preto   ou   Campinas, Brasil" />
         </div>
         <div style="flex: 0 0 130px;">
-          <label for="cityArea" title="Raio em graus. 0.05° ≈ 5,5 km.">Raio (graus)</label>
+          <label for="cityArea">Raio (graus)<span class="help" tabindex="0" role="note" aria-label="Tamanho da área varrida, em graus. 0.05° equivale a cerca de 5,5 km de raio. Maior cobre mais cidade." data-tip="Tamanho da área varrida, em graus. 0.05° ≈ 5,5 km de raio. Maior cobre mais cidade."></span></label>
           <input id="cityArea" type="number" min="0.01" step="0.01" value="0.05" />
         </div>
         <div style="flex: 0 0 130px;">
-          <label for="cityStep" title="Passo da grade. 0.04° ≈ 4 km.">Passo (graus)</label>
+          <label for="cityStep">Passo (graus)<span class="help tip-end" tabindex="0" role="note" aria-label="Distância entre os pontos da grade, em graus. 0.04° equivale a cerca de 4 km. Menor gera mais células: mais cobertura, porém mais lento." data-tip="Distância entre os pontos da grade, em graus. 0.04° ≈ 4 km. Menor = mais células: mais cobertura, porém mais lento."></span></label>
           <input id="cityStep" type="number" min="0.01" step="0.01" value="0.04" />
         </div>
       </div>
@@ -110,19 +110,19 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       <!-- Filtros -->
       <div class="row">
         <div>
-          <label for="max">Máx. por busca (0 = todos)</label>
+          <label for="max">Máx. por busca (0 = todos)<span class="help tip-start" tabindex="0" role="note" aria-label="Limite de resultados por busca. 0 significa sem limite: traz todos os que encontrar." data-tip="Limite de resultados por busca. 0 = sem limite (traz todos os que encontrar)."></span></label>
           <input id="max" type="number" min="0" value="0" />
         </div>
         <div>
-          <label for="minAval">Mín. avaliações</label>
+          <label for="minAval">Mín. avaliações<span class="help" tabindex="0" role="note" aria-label="Descarta locais com menos avaliações que este número. Útil para focar em negócios já estabelecidos." data-tip="Descarta locais com menos avaliações que isto. Útil para focar em negócios já estabelecidos."></span></label>
           <input id="minAval" type="number" min="0" value="5" />
         </div>
         <div>
-          <label for="maxAval">Máx. avaliações</label>
+          <label for="maxAval">Máx. avaliações<span class="help" tabindex="0" role="note" aria-label="Descarta locais com mais avaliações que este número. Útil para evitar grandes redes e achar pequenas e médias empresas." data-tip="Descarta locais com mais avaliações que isto. Útil para evitar grandes redes e achar PMEs."></span></label>
           <input id="maxAval" type="number" min="0" value="100" />
         </div>
         <div>
-          <label for="notaMin">Nota mínima</label>
+          <label for="notaMin">Nota mínima<span class="help tip-end" tabindex="0" role="note" aria-label="Nota mínima no Google, de 0 a 5. Por exemplo, 4 mantém só os locais bem avaliados." data-tip="Nota mínima no Google (0 a 5). Ex.: 4 mantém só os bem avaliados."></span></label>
           <input id="notaMin" type="number" min="0" max="5" step="0.1" value="4" />
         </div>
       </div>
@@ -138,11 +138,11 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
         <div class="adv-body">
           <div class="row">
             <div style="flex: 2 1 260px;">
-              <label for="key">Chave PageSpeed (opcional — usa a padrão do servidor se vazio)</label>
+              <label for="key">Chave PageSpeed (opcional — usa a padrão do servidor se vazio)<span class="help tip-start" tabindex="0" role="note" aria-label="Chave gratuita da API PageSpeed Insights do Google, usada para medir os Core Web Vitals. Opcional: se vazio, usa a chave do servidor. Sem chave, o ritmo de análise é limitado." data-tip="Chave gratuita da API PageSpeed Insights do Google (mede os Core Web Vitals). Opcional: se vazio, usa a do servidor. Sem chave, o ritmo é limitado."></span></label>
               <input id="key" type="password" placeholder="AIza..." autocomplete="off" />
             </div>
             <div style="flex: 0 0 160px;">
-              <label for="conc">Análises em paralelo</label>
+              <label for="conc">Análises em paralelo<span class="help tip-end" tabindex="0" role="note" aria-label="Quantos sites são analisados ao mesmo tempo no enriquecimento de Core Web Vitals. Maior é mais rápido, mas acima de cerca de 15 pode bater no limite da API." data-tip="Quantos sites são analisados ao mesmo tempo no enriquecimento CWV. Maior = mais rápido, mas acima de ~15 pode bater no limite da API."></span></label>
               <input id="conc" type="number" min="1" max="20" value="12" />
             </div>
           </div>

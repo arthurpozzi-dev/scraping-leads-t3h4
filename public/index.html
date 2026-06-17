@@ -5,29 +5,46 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Maps Leads Scraper · T3H4</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="wrap">
-    <header><span class="logo">T3H4</span> <span class="pill">Google Maps Leads</span></header>
-    <h1>Scraper de Leads do Google Maps</h1>
-    <p class="sub">
+    <!-- Topo -->
+    <div class="topbar">
+      <span class="logo">T3H4</span>
+      <span class="brand-name">Maps Leads</span>
+      <span class="spacer"></span>
+      <span class="pill"><span class="dot"></span> Local</span>
+    </div>
+
+    <h1>Scraper de Leads do <span class="accent">Google Maps</span></h1>
+    <p class="lead">
       Cole um ou <b>vários</b> links/termos do Google Maps (um por linha). A ferramenta
       coleta, limpa, filtra e separa os leads em <b>com site</b> e <b>sem site</b>, enriquece
       os sites (Core Web Vitals), puxa o texto de cada site e exporta tudo num pacote.
     </p>
 
-    <!-- Busca + opções -->
+    <!-- ===================== Etapa 1 · Buscar ===================== -->
     <div class="card">
+      <div class="card-head">
+        <span class="step-no">1</span>
+        <div>
+          <h2>Buscar leads</h2>
+          <p class="sub">O que e onde procurar no Google Maps.</p>
+        </div>
+      </div>
+
       <label id="inputLabel" for="input">Links do Google Maps ou termos de busca — um por linha</label>
       <textarea id="input" rows="3"
         placeholder="restaurantes em São Carlos
 dentistas em Ribeirão Preto
 https://www.google.com/maps/search/petshops+em+campinas"></textarea>
 
-      <!-- Modo de busca -->
+      <!-- Modo + engine -->
       <div class="row">
-        <div style="flex: 1 1 360px;">
+        <div style="flex: 1 1 320px;">
           <label for="mode">Modo de busca</label>
           <select id="mode">
             <option value="normal">Normal (navegador) — links ou termos, até ~120 por busca</option>
@@ -35,12 +52,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
             <option value="city">Grade — cidade por nome — sem limite de ~120</option>
           </select>
         </div>
-        <div id="gridHint" class="sub" style="flex: 2 1 320px; align-self:flex-end; margin:0; display:none;"></div>
-      </div>
-
-      <!-- Engine de scraping (vale para a coleta e o enriquecimento) -->
-      <div class="row" style="display:flex; gap:12px; flex-wrap:wrap;">
-        <div style="flex: 1 1 280px;">
+        <div style="flex: 1 1 220px;">
           <label for="engine">Engine</label>
           <select id="engine">
             <option value="playwright">Playwright (padrão)</option>
@@ -48,7 +60,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
             <option value="scrapling">Scrapling (rápido / stealth)</option>
           </select>
         </div>
-        <div id="scraplingModeWrap" style="flex: 0 0 220px; display:none;">
+        <div id="scraplingModeWrap" style="flex: 0 0 200px; display:none;">
           <label for="scraplingMode">Modo Scrapling</label>
           <select id="scraplingMode">
             <option value="fast">fast (HTTP/TLS)</option>
@@ -56,10 +68,12 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
             <option value="stealth">stealth (Camoufox)</option>
           </select>
         </div>
-        <div class="sub" style="flex: 2 1 320px; align-self:flex-end; margin:0;">
-          CloakBrowser e Scrapling exigem instalação (ver README). Scrapling não faz o scroll do Maps — nesse caso a coleta usa Playwright e o Scrapling vale no enriquecimento.
-        </div>
       </div>
+      <p class="field-hint" id="engineHint">
+        CloakBrowser e Scrapling exigem instalação (ver README). Scrapling não faz o scroll do Maps —
+        nesse caso a coleta usa Playwright e o Scrapling vale no enriquecimento.
+      </p>
+      <div id="gridHint" class="field-hint" style="display:none;"></div>
 
       <!-- Opções do modo grade por coordenadas -->
       <div class="row" id="gridOpts" style="display:none;">
@@ -93,6 +107,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
         </div>
       </div>
 
+      <!-- Filtros -->
       <div class="row">
         <div>
           <label for="max">Máx. por busca (0 = todos)</label>
@@ -112,33 +127,65 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
         </div>
       </div>
 
-      <div class="row">
-        <div style="flex: 2 1 240px;">
-          <label for="key">Chave PageSpeed (opcional — usa a padrão do servidor se vazio)</label>
-          <input id="key" type="password" placeholder="AIza..." autocomplete="off" />
+      <!-- Opções avançadas (recolhidas por padrão) -->
+      <details class="adv">
+        <summary>
+          <span class="chev" aria-hidden="true">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </span>
+          Opções avançadas — PageSpeed, concorrência e enriquecimento
+        </summary>
+        <div class="adv-body">
+          <div class="row">
+            <div style="flex: 2 1 260px;">
+              <label for="key">Chave PageSpeed (opcional — usa a padrão do servidor se vazio)</label>
+              <input id="key" type="password" placeholder="AIza..." autocomplete="off" />
+            </div>
+            <div style="flex: 0 0 160px;">
+              <label for="conc">Análises em paralelo</label>
+              <input id="conc" type="number" min="1" max="20" value="12" />
+            </div>
+          </div>
+
+          <div class="toggle-grid" style="margin-top: var(--s4);">
+            <label class="toggle-card">
+              <input id="deepCwv" type="checkbox" />
+              <span>
+                <span class="t-title">Análise CWV profunda</span>
+                <span class="t-desc">Roda o Lighthouse completo (acessibilidade, SEO, boas práticas) em todos. Mais lento. Por padrão usa CrUX + performance.</span>
+              </span>
+            </label>
+            <label class="toggle-card">
+              <input id="deep" type="checkbox" checked />
+              <span>
+                <span class="t-title">Coleta detalhada</span>
+                <span class="t-desc">Abre cada local no Maps para puxar dados completos. Mais lento, porém mais rico.</span>
+              </span>
+            </label>
+            <label class="toggle-card">
+              <input id="renderJs" type="checkbox" checked />
+              <span>
+                <span class="t-title">Fallback de sites JS</span>
+                <span class="t-desc">Em e-mails/redes: abre um navegador real só nos sites feitos em JavaScript que ficaram sem resultado.</span>
+              </span>
+            </label>
+            <label class="toggle-card">
+              <input id="searchSocials" type="checkbox" />
+              <span>
+                <span class="t-title">Redes via busca web</span>
+                <span class="t-desc">Para quem não tem rede social: pesquisa o nome num buscador. Mais lento e pode trazer o perfil errado.</span>
+              </span>
+            </label>
+          </div>
         </div>
-        <div style="flex: 0 0 130px;">
-          <label for="conc">Análises em paralelo</label>
-          <input id="conc" type="number" min="1" max="20" value="12" />
-        </div>
-        <div style="flex: 0 0 auto;">
-          <label title="Por padrão usa dados de campo (CrUX, rápido) e Lighthouse só de performance. Marque para rodar o Lighthouse completo (acessibilidade, SEO, boas práticas) em todos — bem mais lento.">Análise CWV</label>
-          <span class="check"><input id="deepCwv" type="checkbox" /> Análise profunda (mais lenta)</span>
-        </div>
-        <div style="flex: 0 0 auto;">
-          <label>Coleta detalhada</label>
-          <span class="check"><input id="deep" type="checkbox" checked /> Abrir cada local</span>
-        </div>
-        <div style="flex: 0 0 auto;">
-          <label title="Nos botões Enriquecer e-mails / Buscar redes sociais: abre um navegador real só para os sites que ficaram sem resultado (sites feitos em JavaScript). Mais lento, porém pega mais.">Fallback (sites JS)</label>
-          <span class="check"><input id="renderJs" type="checkbox" checked /> Renderizar sites JS</span>
-        </div>
-        <div style="flex: 0 0 auto;">
-          <label title="No botão Buscar redes sociais: para leads sem rede (com ou sem site), pesquisa o nome num buscador para descobrir o perfil. Mais lento e pode trazer o perfil errado.">Redes via busca web</label>
-          <span class="check"><input id="searchSocials" type="checkbox" /> Buscar quem não tem</span>
-        </div>
-        <div style="flex: 0 0 auto;">
-          <button id="go">Buscar leads</button>
+      </details>
+
+      <div class="row" style="margin-top: var(--s5); justify-content: flex-end;">
+        <div style="flex: 0 0 auto; min-width: 0;">
+          <button id="go" class="btn btn-primary btn-lg">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            Buscar leads
+          </button>
         </div>
       </div>
 
@@ -146,15 +193,38 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       <div class="bar" id="bar"><i id="barfill"></i></div>
     </div>
 
-    <!-- Resultados -->
+    <!-- ===================== Etapa 2 · Enriquecer e exportar ===================== -->
     <div class="card" id="resultsCard" style="display: none;">
-      <!-- Ações globais (valem para TODAS as buscas) -->
-      <div class="actions" style="margin-top:0;">
-        <button id="enrich">⚡ Enriquecer sites (Core Web Vitals)</button>
-        <button id="sitetext">🔤 Puxar texto dos sites</button>
-        <button id="emailScrape">📧 Enriquecer e-mails</button>
-        <button id="socialScrape">🔗 Buscar redes sociais</button>
-        <button id="exportZip">📦 Exportar…</button>
+      <div class="card-head">
+        <span class="step-no">2</span>
+        <div>
+          <h2>Enriquecer e exportar</h2>
+          <p class="sub">Rode as etapas que quiser sobre os leads coletados e baixe o pacote.</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button id="enrich" class="btn">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          Enriquecer sites (CWV)
+        </button>
+        <button id="sitetext" class="btn">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8M10 9H8"/></svg>
+          Puxar texto dos sites
+        </button>
+        <button id="emailScrape" class="btn">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
+          Enriquecer e-mails
+        </button>
+        <button id="socialScrape" class="btn">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5 8.6 10.5"/></svg>
+          Buscar redes sociais
+        </button>
+        <span class="grow"></span>
+        <button id="exportZip" class="btn btn-primary">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+          Exportar…
+        </button>
       </div>
       <div class="status" id="enrichStatus"></div>
       <div class="bar" id="enrichBar"><i id="enrichFill"></i></div>
@@ -166,7 +236,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       </div>
 
       <!-- Seletor de busca (aparece quando há mais de uma) -->
-      <div id="buscaPicker" style="display:none;margin:18px 0 4px;">
+      <div id="buscaPicker" style="display:none;margin:18px 0 4px; max-width:520px;">
         <label for="buscaSel">Busca</label>
         <select id="buscaSel"></select>
       </div>
@@ -175,28 +245,40 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       <div class="summary" id="summary"></div>
 
       <div class="tabs">
-        <button class="tab active" data-tab="com">Com site (<span id="countCom">0</span>)</button>
-        <button class="tab" data-tab="sem">Sem site (<span id="countSem">0</span>)</button>
+        <button class="tab active" data-tab="com">Com site <span class="count">(<span id="countCom">0</span>)</span></button>
+        <button class="tab" data-tab="sem">Sem site <span class="count">(<span id="countSem">0</span>)</span></button>
       </div>
 
       <!-- Aba: com site -->
       <section class="panel active" id="panel-com">
-        <div class="actions">
-          <button class="ghost" data-dl="com-site" data-ext="csv">⬇ CSV (esta busca)</button>
-          <button class="ghost" data-dl="com-site" data-ext="xlsx">⬇ XLSX (esta busca)</button>
+        <div class="toolbar" style="margin-bottom: var(--s3);">
+          <button class="ghost" data-dl="com-site" data-ext="csv">
+            <svg class="icon-sm icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+            CSV (esta busca)
+          </button>
+          <button class="ghost" data-dl="com-site" data-ext="xlsx">
+            <svg class="icon-sm icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+            XLSX (esta busca)
+          </button>
         </div>
-        <div class="tablewrap" style="margin-top: 14px;">
+        <div class="tablewrap">
           <table id="tableCom"><thead></thead><tbody></tbody></table>
         </div>
       </section>
 
       <!-- Aba: sem site -->
       <section class="panel" id="panel-sem">
-        <div class="actions">
-          <button class="ghost" data-dl="sem-site" data-ext="csv">⬇ CSV (esta busca)</button>
-          <button class="ghost" data-dl="sem-site" data-ext="xlsx">⬇ XLSX (esta busca)</button>
+        <div class="toolbar" style="margin-bottom: var(--s3);">
+          <button class="ghost" data-dl="sem-site" data-ext="csv">
+            <svg class="icon-sm icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+            CSV (esta busca)
+          </button>
+          <button class="ghost" data-dl="sem-site" data-ext="xlsx">
+            <svg class="icon-sm icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+            XLSX (esta busca)
+          </button>
         </div>
-        <div class="tablewrap" style="margin-top: 14px;">
+        <div class="tablewrap">
           <table id="tableSem"><thead></thead><tbody></tbody></table>
         </div>
       </section>
@@ -278,7 +360,10 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       <div class="modalActions">
         <span id="ex-status"></span>
         <button type="button" class="ghost" id="ex-cancel">Cancelar</button>
-        <button type="button" id="ex-go">⬇ Exportar (.zip)</button>
+        <button type="button" class="btn btn-primary" id="ex-go">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+          Exportar (.zip)
+        </button>
       </div>
     </div>
   </div>

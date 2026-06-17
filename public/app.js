@@ -96,9 +96,11 @@ function renderCell(value, type, row) {
   if (type === "report") {
     if (!value) return ""; // sem relatório (lead ainda não enriquecido ou N/A)
     const idx = row && row.__idx != null ? row.__idx : "";
+    const icoView = '<svg class="icon-sm icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="12" y="6" width="3" height="11"/><rect x="17" y="13" width="3" height="4"/></svg>';
+    const icoSale = '<svg class="icon-sm icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-4 5 4"/></svg>';
     return (
-      `<button class="ghost mini" onclick="toggleReport(this)">📊 ver</button> ` +
-      `<button class="ghost mini" onclick="openSalesReport(${idx})" title="Relatório persuasivo para apresentar ao lead">📄 venda</button>`
+      `<button class="ghost mini" onclick="toggleReport(this)">${icoView} ver</button> ` +
+      `<button class="ghost mini" onclick="openSalesReport(${idx})" title="Relatório persuasivo para apresentar ao lead">${icoSale} venda</button>`
     );
   }
   return String(v);

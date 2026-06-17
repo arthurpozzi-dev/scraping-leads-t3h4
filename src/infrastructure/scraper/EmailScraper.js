@@ -101,14 +101,31 @@ export class EmailScraper {
    * @param {number} [options.maxPages=6]       máx. de páginas internas visitadas além da home
    * @param {number} [options.retries=1]        re-tentativas em falhas transitórias (timeout/rede/5xx/429)
    */
-  constructor({ timeoutMs = 15000, maxPages = 6, retries = 1 } = {}) {
+  constructor({ timeoutMs = 15000, maxPages = 6, retries = 1, engine } = {}) {
     this.timeoutMs = timeoutMs;
     this.maxPages = maxPages;
     this.retries = retries;
+    this.engine = engine; // opcional: roteia o fetch por um engine (cloak/scrapling)
   }
 
   /** Uma requisição GET de HTML (ou lança um erro legível e classificável). */
   async #get(url) {
+    // Caminho via engine selecionável (CloakBrowser/Scrapling) — preserva a
+    // classificação de erros transitórios por status.
+    if (this.engine) {
+      const { html, status } = await this.engine.fetchHtml(url, { timeoutMs: this.timeoutMs });
+      if (status && (status === 429 || status >= 500)) {
+        const e = new Error(`HTTP ${status}`);
+        e.transient = true;
+        throw e;
+      }
+      if (status && status >= 400) {
+        const e = new Error(`HTTP ${status}`);
+        e.transient = false;
+        throw e;
+      }
+      return html;
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {

@@ -241,8 +241,9 @@ export class SiteTextScraper {
    * @param {Object} [options]
    * @param {number} [options.timeoutMs=15000]
    */
-  constructor({ timeoutMs = 15000 } = {}) {
+  constructor({ timeoutMs = 15000, engine } = {}) {
     this.timeoutMs = timeoutMs;
+    this.engine = engine; // opcional: roteia o fetch por um engine (cloak/scrapling)
   }
 
   /**
@@ -253,6 +254,11 @@ export class SiteTextScraper {
    */
   async fetchText(url) {
     const target = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    if (this.engine) {
+      const { html, status } = await this.engine.fetchHtml(target, { timeoutMs: this.timeoutMs });
+      if (status && status >= 400) throw new Error(`HTTP ${status}`);
+      return { text: htmlToText(html), emails: extractEmails(html) };
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {

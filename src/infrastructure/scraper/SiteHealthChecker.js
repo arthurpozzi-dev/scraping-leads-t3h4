@@ -74,8 +74,9 @@ export class SiteHealthChecker {
    * @param {Object} [options]
    * @param {number} [options.timeoutMs=12000]
    */
-  constructor({ timeoutMs = 12000 } = {}) {
+  constructor({ timeoutMs = 12000, engine } = {}) {
     this.timeoutMs = timeoutMs;
+    this.engine = engine; // opcional: roteia o fetch por um engine (cloak/scrapling)
   }
 
   /**
@@ -84,6 +85,19 @@ export class SiteHealthChecker {
    */
   async check(url) {
     const target = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    if (this.engine) {
+      try {
+        const { html, status } = await this.engine.fetchHtml(target, { timeoutMs: this.timeoutMs });
+        if (status === 404 || status === 410 || status >= 500) return { down: true, reason: `HTTP ${status}` };
+        if (status >= 200 && status < 300) {
+          const marker = detectErrorPage(html);
+          if (marker) return { down: true, reason: `Página de erro: "${marker}"` };
+        }
+        return { down: false };
+      } catch (e) {
+        return { down: false, reason: e.message };
+      }
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {

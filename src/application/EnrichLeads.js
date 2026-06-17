@@ -35,13 +35,19 @@ export async function enrichLeads(comSite = [], pageSpeedClient, onProgress, opt
   let ok = 0;
   let falhas = 0;
   let foraDoAr = 0;
+  // CrUX-first: dado de campo real (~300ms) evita rodar o Lighthouse (lento) nos
+  // sites que têm amostra. `deep` força o Lighthouse completo (4 categorias) e
+  // pula o CrUX. O healthcheck virou OPT-IN: o servidor não o passa mais por
+  // padrão (mantém o caminho quente rápido), mas quem quiser detectar "FORA DO
+  // AR" antes de gastar uma medição ainda pode injetar `healthChecker`.
+  const cruxClient = options.cruxClient;
+  const deep = !!options.deep;
   const healthChecker = options.healthChecker;
 
   const leads = await runPool(comSite, {
     concurrency: options.concurrency || DEFAULT_CONCURRENCY,
     task: async (lead) => {
-      // Antes de medir: o site está mesmo no ar? Página de erro/404 carrega
-      // rápido e enganaria o PageSpeed com uma nota boa.
+      // 0) Pré-checagem opcional de site fora do ar (opt-in).
       if (healthChecker) {
         const h = await healthChecker.check(lead.site);
         if (h.down) {
@@ -49,6 +55,37 @@ export async function enrichLeads(comSite = [], pageSpeedClient, onProgress, opt
           return { ...lead, cwv_score: null, cwv_status: "FORA DO AR", cwv_erro: h.reason || "site fora do ar" };
         }
       }
+      // 1) Tenta dado de campo (CrUX) primeiro — só no modo rápido.
+      if (cruxClient && !deep) {
+        try {
+          const f = await cruxClient.query(lead.site);
+          if (f && f.hasField) {
+            ok++;
+            return {
+              ...lead,
+              cwv_score: f.score,
+              cwv_status: classifyCwv(f.score),
+              cwv_erro: "",
+              cwv_lcp: f.lcp?.p75 != null ? `${f.lcp.p75} ms` : "",
+              cwv_fcp: f.fcp?.p75 != null ? `${f.fcp.p75} ms` : "",
+              cwv_cls: f.cls?.p75 != null ? String(f.cls.p75) : "",
+              cwv_tbt: "",
+              cwv_si: "",
+              cwv_tti: "",
+              score_acessibilidade: "",
+              score_boas_praticas: "",
+              score_seo: "",
+              audit_score: "",
+              cwv_oportunidades: "",
+              cwv_campo: f.overall || "",
+              cwv_report: null, // sem relatório de laboratório no caminho rápido
+            };
+          }
+        } catch {
+          /* CrUX falhou/timeout: cai para o Lighthouse abaixo */
+        }
+      }
+      // 2) Fallback de laboratório (Lighthouse via PageSpeed).
       try {
         const report = await pageSpeedClient.analyze(lead.site);
         const status = classifyCwv(report.score);

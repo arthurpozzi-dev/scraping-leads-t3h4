@@ -25,6 +25,7 @@ import { randomUUID } from "node:crypto";
 import { runPipeline } from "../../application/runPipeline.js";
 import { dedupeAcrossBuscas } from "../../application/dedupeAcrossBuscas.js";
 import { enrichLeads } from "../../application/EnrichLeads.js";
+import { createJobCache } from "../../application/jobCache.js";
 import { scrapeSiteTexts } from "../../application/scrapeSiteTexts.js";
 import { enrichEmails } from "../../application/enrichEmails.js";
 import { enrichSocials } from "../../application/enrichSocials.js";
@@ -133,6 +134,8 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
   app.use(express.static(PUBLIC_DIR));
 
   const store = new Map();
+  /** Cache/dedup do job (criado sob demanda; some com o job). */
+  const cacheFor = (item) => (item.cache ||= createJobCache());
   setInterval(() => {
     const now = Date.now();
     for (const [id, v] of store) if (now - v.ts > 3600_000) store.delete(id);
@@ -252,8 +255,10 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
       return res.end();
     }
     const apiKey = (req.query.key || "").toString().trim();
+    const lighthouseUrl = (req.query.lighthouseUrl || process.env.LIGHTHOUSE_SERVER_URL || "").toString().trim();
     const deep = req.query.deep === "1";
-    const { pageSpeed: client, crux } = buildEnrichClients({ apiKey, deep });
+    const { pageSpeed: client, crux } = buildEnrichClients({ apiKey, deep, lighthouseUrl });
+    const cache = cacheFor(item);
     const concurrency =
       parseInt(req.query.conc, 10) || parseInt(process.env.ENRICH_CONCURRENCY, 10) || 12;
 
@@ -271,7 +276,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
             if (p.erro) console.warn(`[enrich] ${p.status} "${p.nome}": ${p.erro}`);
             send("progress", { current: ++done, total, nome: p.nome, status: p.status, query: b.query });
           },
-          { concurrency, cruxClient: crux, deep }
+          { concurrency, cruxClient: crux, deep, cwvCache: cache.cwv }
         );
         b.comSite = r.leads;
         ok += r.ok;
@@ -346,6 +351,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
       : null;
     const browserConcurrency =
       parseInt(req.query.bconc, 10) || parseInt(process.env.EMAIL_BROWSER_CONCURRENCY, 10) || 2;
+    const cache = cacheFor(item);
 
     let ok = 0;
     let semEmail = 0;
@@ -363,7 +369,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
             if (p.erro) console.warn(`[emails] "${p.nome}": ${p.erro}`);
             sendProgress(p, b.query);
           },
-          { concurrency, browserScraper, browserConcurrency }
+          { concurrency, browserScraper, browserConcurrency, pageCache: cache.page }
         );
         b.comSite = r.leads;
         ok += r.ok;
@@ -402,6 +408,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
       parseInt(req.query.bconc, 10) || parseInt(process.env.EMAIL_BROWSER_CONCURRENCY, 10) || 2;
     // Busca web (descoberta para quem não tem rede): opt-in via search=1.
     const useSearch = req.query.search === "1" && !!socialSearchScraper;
+    const cache = cacheFor(item);
 
     let ok = 0;
     let semRedes = 0;
@@ -418,7 +425,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
             if (p.erro) console.warn(`[socials] "${p.nome}": ${p.erro}`);
             sendProgress(p, b.query);
           },
-          { concurrency, browserConcurrency }
+          { concurrency, browserConcurrency, pageCache: cache.page, searchCache: cache.search }
         );
         b.comSite = r.comSite;
         b.semSite = r.semSite;
@@ -457,8 +464,9 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
         return res.status(409).send("Enriqueça os sites (Core Web Vitals) antes de gerar o relatório.");
       try {
         const apiKey = (req.query.key || "").toString().trim();
-        const { pageSpeed } = buildEnrichClients({ apiKey, deep: true });
-        await ensureFullReport(lead, pageSpeed);
+        const lighthouseUrl = (req.query.lighthouseUrl || process.env.LIGHTHOUSE_SERVER_URL || "").toString().trim();
+        const { pageSpeed } = buildEnrichClients({ apiKey, deep: true, lighthouseUrl });
+        await ensureFullReport(lead, pageSpeed, cacheFor(item).cwv);
       } catch (e) {
         return res
           .status(409)

@@ -9,8 +9,8 @@
  * O HTML do Maps muda com frequência; os seletores CSS (`.hfpxzc`, `.qBF1Pd`,
  * `data-item-id`…) podem precisar de ajuste se a coleta parar de funcionar.
  */
-import { chromium } from "playwright";
 import { SOCIAL_DOMAINS } from "../../domain/classification.js";
+import { PlaywrightEngine } from "../engine/PlaywrightEngine.js";
 // buildLaunchOptions foi movido para engine/launchOptions.js; re-exportado aqui
 // para não quebrar importadores existentes (PdfRenderer, BrowserEmailScraper).
 import { buildLaunchOptions } from "../engine/launchOptions.js";
@@ -235,8 +235,9 @@ export class GoogleMapsScraper {
    * @param {Object} [options]
    * @param {boolean} [options.headless=true]
    */
-  constructor({ headless = true } = {}) {
+  constructor({ headless = true, engine } = {}) {
     this.headless = headless;
+    this.engine = engine; // opcional; o servidor injeta o engine por requisição em scrape()
   }
 
   /**
@@ -248,11 +249,12 @@ export class GoogleMapsScraper {
    * @param {(p: any) => void} [opts.onProgress]
    * @returns {Promise<Array<Record<string, any>>>} leads crus.
    */
-  async scrape({ input, maxResults = 0, deep = true, onProgress }) {
+  async scrape({ input, maxResults = 0, deep = true, onProgress, engine }) {
     const url = buildSearchUrl(input);
     const progress = (p) => onProgress?.(p);
 
-    const browser = await chromium.launch(buildLaunchOptions(this.headless));
+    const eng = engine || this.engine || new PlaywrightEngine();
+    const browser = await eng.launchBrowser({ headless: this.headless });
     const context = await browser.newContext({
       locale: "pt-BR",
       viewport: { width: 1280, height: 900 },

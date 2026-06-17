@@ -122,7 +122,7 @@ Vale tanto para o scrape do Google Maps quanto para os fetches de sites de terce
 | Engine | Quando usar | Instalação |
 |--------|-------------|------------|
 | **Playwright** | Padrão. Já vem instalado. | nenhuma |
-| **CloakBrowser** | Anti-ban: Chromium stealth (passa Cloudflare Turnstile/FingerprintJS, `webdriver=false`). Drop-in do Playwright. | `npm install` já traz o pacote; o binário (~200MB) baixa sozinho em `~/.cloakbrowser/` no 1º uso. Licença do binário: uso livre, sem redistribuição. |
+| **CloakBrowser** | Anti-ban: Chromium stealth (passa Cloudflare Turnstile/FingerprintJS, `webdriver=false`). Drop-in do Playwright. | `npm install` já traz o pacote; o binário (~200MB) baixa sozinho em `~/.cloakbrowser/` no 1º uso. Precisa das mesmas libs de sistema do Chromium (libnss3, libnspr4, libasound2…): no Linux instale via apt **ou** use a pasta `.chromium-libs/` do projeto (o engine já a coloca no `LD_LIBRARY_PATH`). Licença do binário: uso livre, sem redistribuição. |
 | **Scrapling** | Fetch rápido/stealth de alto volume (impersonação de TLS, Camoufox, bypass de Cloudflare). Cobre a **camada de fetch**. | Requer o sidecar Python — ver `scrapling-sidecar/README.md` (Python ≥3.10, `pip install -r requirements.txt`, `scrapling install`). |
 
 **Modo Scrapling** (`fast` / `dynamic` / `stealth`) aparece ao escolher Scrapling:

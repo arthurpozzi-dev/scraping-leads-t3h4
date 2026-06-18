@@ -71,14 +71,32 @@ export class ScraplingEngine {
 
   async fetchHtml(url, { timeoutMs = 20000, mode } = {}) {
     await this._ensure();
-    const res = await this._fetch(`${this._baseUrl}/fetch`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url, mode: mode || this.mode, timeout: timeoutMs }),
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(`Scrapling: ${data.error}`);
-    return { html: data.html, status: data.status ?? 0, finalUrl: data.final_url || url };
+    // Teto do lado do Node: se o Scrapling travar (modos de navegador costumam
+    // pendurar), o sidecar não devolve e este fetch ficaria preso PARA SEMPRE,
+    // congelando um worker do pool. Abortamos com folga sobre o timeout interno.
+    const controller = new AbortController();
+    const hardMs = timeoutMs + 5000;
+    const timer = setTimeout(() => controller.abort(), hardMs);
+    try {
+      const res = await this._fetch(`${this._baseUrl}/fetch`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url, mode: mode || this.mode, timeout: timeoutMs }),
+        signal: controller.signal,
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(`Scrapling: ${data.error}`);
+      return { html: data.html, status: data.status ?? 0, finalUrl: data.final_url || url };
+    } catch (e) {
+      if (e.name === "AbortError") {
+        const err = new Error(`Scrapling: tempo esgotado (>${Math.round(hardMs / 1000)}s)`);
+        err.transient = true;
+        throw err;
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async launchBrowser() {

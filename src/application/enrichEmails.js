@@ -2,10 +2,14 @@
  * Caso de uso: ENRIQUECIMENTO de e-mails da lista "com site".
  *
  * Faz um scraping COMPLETO de e-mails (home + páginas de contato) e preenche
- * `site_emails`, em duas fases:
+ * `site_emails`, numa CASCATA de até três fases (cada uma só pega o que a
+ * anterior não resolveu — do mais barato ao mais caro):
  *
- *   Fase 1 — RÁPIDA (fetch, via `emailScraper`): cobre a grande maioria dos
- *            sites; barata e paralela.
+ *   Fase 1 — RÁPIDA (fetch nativo, via `emailScraper`): cobre a grande maioria
+ *            dos sites; barata e paralela.
+ *   Fase 1.5 — ANTI-BAN (opcional, via `options.engineScraper`): re-tenta SÓ os
+ *            sites que BLOQUEARAM o fetch nativo (Cloudflare/403/TLS), usando um
+ *            engine em modo HTTP (Scrapling fast) — sem navegador, ainda barato.
  *   Fase 2 — NAVEGADOR (opcional, via `options.browserScraper`): roda SÓ nos
  *            leads que ficaram sem e-mail, renderizando o site num browser real
  *            para alcançar páginas 100% JavaScript. Cara, então com pouca
@@ -19,7 +23,8 @@ import { mergeSocialLinks, recordSocialSources } from "../domain/classification.
 import { runPool } from "./concurrentPool.js";
 import { cacheKey } from "./jobCache.js";
 
-const DEFAULT_CONCURRENCY = 6;
+const DEFAULT_CONCURRENCY = 20; // fetch nativo: I/O puro, escala bem
+const DEFAULT_ENGINE_CONCURRENCY = 4;
 const DEFAULT_BROWSER_CONCURRENCY = 2;
 
 /** Une e deduplica duas listas de e-mails (em minúsculas). */
@@ -41,8 +46,8 @@ const emailCount = (lead) => (lead.site_emails || "").split(" | ").filter(Boolea
  * @param {import("../domain/Lead.js").Lead[]} comSite
  * @param {{ scrapeEmails: (url:string)=>Promise<{emails:string[], pagesVisited:number}> }} emailScraper
  * @param {(p: { fase:"rápido"|"navegador", current:number, total:number, nome:string, encontrados:number, erro?:string }) => void} [onProgress]
- * @param {{ concurrency?: number, browserScraper?: { scrapeEmails:(url:string)=>Promise<{emails:string[]}> }, browserConcurrency?: number }} [options]
- * @returns {Promise<{ leads: import("../domain/Lead.js").Lead[], ok: number, semEmail: number, falhas: number, renderizados: number }>}
+ * @param {{ concurrency?: number, engineScraper?: { scrapeContacts:(url:string)=>Promise<{emails:string[],socials:string[]}> }, engineConcurrency?: number, browserScraper?: { scrapeEmails:(url:string)=>Promise<{emails:string[]}> }, browserConcurrency?: number }} [options]
+ * @returns {Promise<{ leads: import("../domain/Lead.js").Lead[], ok: number, semEmail: number, falhas: number, renderizados: number, antiBan: number }>}
  */
 export async function enrichEmails(comSite = [], emailScraper, onProgress, options = {}) {
   // ---- Fase 1: scraping rápido (fetch) ----------------------------------
@@ -84,6 +89,47 @@ export async function enrichEmails(comSite = [], emailScraper, onProgress, optio
         erro: result.site_emails_erro || undefined,
       }),
   });
+
+  // ---- Fase 1.5: re-tentativa ANTI-BAN (engine HTTP) p/ quem NÃO carregou ----
+  // Cascata: a Fase 1 usa fetch nativo (rápido). Sites que BLOQUEIAM o fetch
+  // (Cloudflare/403/TLS) caem aqui e são re-tentados via engine em modo HTTP
+  // (Scrapling fast = impersonação de TLS) — sem navegador, barato e paralelo.
+  // Só re-tenta quem ERROU o carregamento; quem carregou mas não tinha e-mail é
+  // caso de JS → vai para o navegador (Fase 2).
+  let antiBan = 0;
+  const engineScraper = options.engineScraper;
+  if (engineScraper) {
+    const bloqueados = leads.map((lead, i) => ({ lead, i })).filter(({ lead }) => lead.site_emails_erro);
+    if (bloqueados.length) {
+      const eTotal = bloqueados.length;
+      let eDone = 0;
+      const scrapeViaEngine = (url) =>
+        pageCache ? pageCache.run("eng:" + cacheKey(url), () => engineScraper.scrapeContacts(url)) : engineScraper.scrapeContacts(url);
+      await runPool(bloqueados, {
+        concurrency: options.engineConcurrency || DEFAULT_ENGINE_CONCURRENCY,
+        task: async ({ lead, i }) => {
+          try {
+            const { emails, socials } = await scrapeViaEngine(lead.site);
+            const merged = mergeEmails(lead.site_emails, emails);
+            const antesRedes = lead.redes_sociais || "";
+            const redes = mergeSocialLinks(antesRedes, socials);
+            const fontes = recordSocialSources(lead.redes_fontes, antesRedes, redes, "site");
+            if (merged.length) {
+              antiBan++;
+              // Engine alcançou o site: limpa o erro do fetch nativo.
+              leads[i] = { ...lead, site_emails: merged.join(" | "), redes_sociais: redes, redes_fontes: fontes, site_emails_erro: "" };
+            } else if (redes !== antesRedes) {
+              leads[i] = { ...lead, redes_sociais: redes, redes_fontes: fontes };
+            }
+          } catch {
+            /* engine também não alcançou: mantém o erro da Fase 1 (tenta navegador) */
+          }
+        },
+        onDone: (d, t, { lead, i }) =>
+          onProgress?.({ fase: "anti-ban", current: ++eDone, total: eTotal, nome: lead.nome, encontrados: emailCount(leads[i]) }),
+      });
+    }
+  }
 
   // ---- Fase 2: fallback com navegador (só para quem ficou sem e-mail) ----
   let renderizados = 0;
@@ -136,5 +182,5 @@ export async function enrichEmails(comSite = [], emailScraper, onProgress, optio
     else semEmail++; // carregou, mas sem e-mail
   }
 
-  return { leads, ok, semEmail, falhas, renderizados };
+  return { leads, ok, semEmail, falhas, renderizados, antiBan };
 }

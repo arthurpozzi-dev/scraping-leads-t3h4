@@ -97,15 +97,45 @@ export function findContactLinks(html, baseUrl) {
 export class EmailScraper {
   /**
    * @param {Object} [options]
-   * @param {number} [options.timeoutMs=15000] tempo máximo por requisição
+   * @param {number} [options.timeoutMs=10000] tempo máximo por requisição
    * @param {number} [options.maxPages=6]       máx. de páginas internas visitadas além da home
-   * @param {number} [options.retries=1]        re-tentativas em falhas transitórias (timeout/rede/5xx/429)
+   * @param {number} [options.pageConcurrency=4] páginas de contato baixadas em paralelo por lead
+   * @param {number} [options.retries=0]        re-tentativas em falhas transitórias na HOME (as
+   *                                            3 variações www/apex/http já são o fallback)
    */
-  constructor({ timeoutMs = 15000, maxPages = 6, retries = 1, engine } = {}) {
+  constructor({ timeoutMs = 10000, maxPages = 6, pageConcurrency = 4, retries = 0, engine, engineMode } = {}) {
     this.timeoutMs = timeoutMs;
     this.maxPages = maxPages;
+    this.pageConcurrency = pageConcurrency;
     this.retries = retries;
     this.engine = engine; // opcional: roteia o fetch por um engine (cloak/scrapling)
+    // Força um modo do engine por chamada (ex.: "fast" p/ a re-tentativa anti-ban
+    // de e-mail — HTTP, NUNCA navegador). undefined => usa o modo padrão do engine.
+    this.engineMode = engineMode;
+  }
+
+  /**
+   * Baixa várias páginas em paralelo (cap `pageConcurrency`), tolerando falhas
+   * individuais. Devolve só os HTMLs que carregaram, na ordem em que chegaram.
+   * @param {string[]} urls
+   * @returns {Promise<string[]>}
+   */
+  async #fetchPages(urls) {
+    const out = [];
+    let i = 0;
+    const worker = async () => {
+      while (i < urls.length) {
+        const link = urls[i++];
+        try {
+          out.push(await this.#get(link)); // uma página de contato que falha não derruba o lead
+        } catch {
+          /* 404/timeout numa página sondada é esperado: ignora */
+        }
+      }
+    };
+    const n = Math.min(this.pageConcurrency, urls.length) || 0;
+    await Promise.all(Array.from({ length: n }, worker));
+    return out;
   }
 
   /** Uma requisição GET de HTML (ou lança um erro legível e classificável). */
@@ -113,7 +143,7 @@ export class EmailScraper {
     // Caminho via engine selecionável (CloakBrowser/Scrapling) — preserva a
     // classificação de erros transitórios por status.
     if (this.engine) {
-      const { html, status } = await this.engine.fetchHtml(url, { timeoutMs: this.timeoutMs });
+      const { html, status } = await this.engine.fetchHtml(url, { timeoutMs: this.timeoutMs, mode: this.engineMode });
       if (status && (status === 429 || status >= 500)) {
         const e = new Error(`HTTP ${status}`);
         e.transient = true;
@@ -218,15 +248,14 @@ export class EmailScraper {
       .filter((u) => u !== finalUrl)
       .slice(0, this.maxPages);
 
-    for (const link of candidates) {
-      try {
-        const page = await this.#get(link); // caminho comum pode ser 404: tudo bem
-        pagesVisited++;
-        for (const e of extractEmails(page)) emails.add(e);
-        for (const s of extractSocials(page)) socials.add(s);
-      } catch {
-        /* uma página de contato que falha não derruba o lead */
-      }
+    // Páginas de contato em PARALELO (não em série): a home + N páginas viravam
+    // ~7 idas à rede enfileiradas por lead; agora a home é 1 ida e as candidatas
+    // saem juntas (cap `pageConcurrency`). Mesma cobertura, latência por lead ~3× menor.
+    const pages = await this.#fetchPages(candidates);
+    pagesVisited += pages.length;
+    for (const page of pages) {
+      for (const e of extractEmails(page)) emails.add(e);
+      for (const s of extractSocials(page)) socials.add(s);
     }
 
     return { emails: [...emails], socials: [...socials], pagesVisited };

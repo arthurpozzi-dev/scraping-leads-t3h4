@@ -18,6 +18,7 @@
  *   GET /api/download/:id/:b/:list.:ext             -> CSV/XLSX de uma lista de uma busca
  */
 import express from "express";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -25,7 +26,7 @@ import { randomUUID } from "node:crypto";
 import { runPipeline } from "../../application/runPipeline.js";
 import { dedupeAcrossBuscas } from "../../application/dedupeAcrossBuscas.js";
 import { enrichLeads } from "../../application/EnrichLeads.js";
-import { createJobCache } from "../../application/jobCache.js";
+import { createJobCache, createCwvCache } from "../../application/jobCache.js";
 import { scrapeSiteTexts } from "../../application/scrapeSiteTexts.js";
 import { enrichEmails } from "../../application/enrichEmails.js";
 import { enrichSocials } from "../../application/enrichSocials.js";
@@ -166,6 +167,14 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
   const store = new Map();
   /** Cache/dedup do job (criado sob demanda; some com o job). */
   const cacheFor = (item) => (item.cache ||= createJobCache());
+  /**
+   * Cache de CWV PERSISTENTE entre jobs (por domínio + modo), com TTL. Reanalisar
+   * o mesmo domínio em re-runs/buscas repetidas é o desperdício mais caro do
+   * enriquecimento — aqui ele vira leitura instantânea. TTL configurável via env.
+   */
+  const cwvStore = createCwvCache({
+    ttlMs: (parseInt(process.env.CWV_CACHE_TTL_MIN, 10) || 360) * 60_000,
+  });
   setInterval(() => {
     const now = Date.now();
     for (const [id, v] of store) if (now - v.ts > 3600_000) store.delete(id);
@@ -311,9 +320,26 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
     }
     const deep = req.query.deep === "1";
     const { pageSpeed: client, crux } = buildEnrichClients({ apiKey, deep, lighthouseUrl });
-    const cache = cacheFor(item);
-    const concurrency =
-      parseInt(req.query.conc, 10) || parseInt(process.env.ENRICH_CONCURRENCY, 10) || 12;
+    // Concorrência conforme ONDE o laboratório roda:
+    //  - API do Google (lighthouseUrl vazio): o trabalho é offloaded, então o
+    //    nosso lado é só I/O de rede — paraleliza alto (ENRICH_CONCURRENCY, ~24).
+    //  - Self-hosted/custom: cada run é Lighthouse CPU-bound NA NOSSA máquina;
+    //    passar de ~metade dos núcleos só gera contenção e timeout (vira N/A).
+    //    Capa em floor(núcleos/2) E no nº de workers (evita fila de 1 no worker).
+    const labUrls = (lighthouseUrl || "").split(",").map((u) => u.trim()).filter(Boolean);
+    const requested = parseInt(req.query.conc, 10) || 0; // 0 = automático (campo "auto")
+    let concurrency;
+    if (labUrls.length) {
+      // Self-hosted: default floor(núcleos/2). E NUNCA mais que o nº de workers —
+      // mesmo com valor explícito —, pois acima disso só enfileira no worker e
+      // estoura o timeout (vira N/A).
+      const base = requested || parseInt(process.env.ENRICH_CONCURRENCY_LOCAL, 10) || Math.max(1, Math.floor(os.cpus().length / 2));
+      concurrency = Math.min(base, labUrls.length);
+    } else {
+      // API do Google: default 24, com clamp de segurança em 50 para não martelar
+      // a cota por acidente (mesmo se alguém forçar um valor enorme).
+      concurrency = Math.min(requested || parseInt(process.env.ENRICH_CONCURRENCY, 10) || 24, 50);
+    }
 
     const total = totalComSite(item.buscas);
     let done = 0;
@@ -329,7 +355,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
             if (p.erro) console.warn(`[enrich] ${p.status} "${p.nome}": ${p.erro}`);
             send("progress", { current: ++done, total, nome: p.nome, status: p.status, query: b.query });
           },
-          { concurrency, cruxClient: crux, deep, cwvCache: cache.cwv }
+          { concurrency, cruxClient: crux, deep, cwvCache: cwvStore }
         );
         b.comSite = r.leads;
         ok += r.ok;
@@ -392,9 +418,18 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
       return res.end();
     }
     const concurrency =
-      parseInt(req.query.conc, 10) || parseInt(process.env.EMAIL_CONCURRENCY, 10) || 6;
+      parseInt(req.query.conc, 10) || parseInt(process.env.EMAIL_CONCURRENCY, 10) || 20;
     const engine = resolveEngine(req);
-    const es = engine.name === "playwright" ? emailScraper : new EmailScraper({ engine });
+    // Cascata de 3 níveis (ver enrichEmails):
+    //  1) fetch nativo SEMPRE (rápido/paralelo) — independente do engine escolhido;
+    //  2) anti-ban: re-tenta os sites BLOQUEADOS via engine em HTTP (Scrapling fast),
+    //     sem navegador — só quando o engine não é o Playwright;
+    //  3) navegador: fallback para sites JS (Fase 2 abaixo).
+    const es = emailScraper;
+    const engineScraper =
+      engine.name !== "playwright" ? new EmailScraper({ engine, engineMode: "fast" }) : null;
+    const engineConcurrency =
+      parseInt(req.query.econc, 10) || parseInt(process.env.EMAIL_ENGINE_CONCURRENCY, 10) || 4;
     // Fallback com navegador (sites JS): ligado por padrão, desligável com render=0.
     // Usa o engine escolhido se ele fornece browser ao vivo (ex.: CloakBrowser anti-ban);
     // senão (Scrapling) cai no Playwright para o fallback.
@@ -410,6 +445,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
     let semEmail = 0;
     let falhas = 0;
     let renderizados = 0;
+    let antiBan = 0;
     // Progresso por fase: cada fase reporta seu próprio current/total (a barra reinicia).
     const sendProgress = (p, query) =>
       send("progress", { fase: p.fase, current: p.current, total: p.total, nome: p.nome, encontrados: p.encontrados, query });
@@ -422,16 +458,17 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
             if (p.erro) console.warn(`[emails] "${p.nome}": ${p.erro}`);
             sendProgress(p, b.query);
           },
-          { concurrency, browserScraper, browserConcurrency, pageCache: cache.page }
+          { concurrency, engineScraper, engineConcurrency, browserScraper, browserConcurrency, pageCache: cache.page }
         );
         b.comSite = r.leads;
         ok += r.ok;
         semEmail += r.semEmail;
         falhas += r.falhas;
         renderizados += r.renderizados;
+        antiBan += r.antiBan;
       }
       item.ts = Date.now();
-      send("done", { ok, semEmail, falhas, renderizados, comSitePerBusca: item.buscas.map((b) => b.comSite) });
+      send("done", { ok, semEmail, falhas, renderizados, antiBan, comSitePerBusca: item.buscas.map((b) => b.comSite) });
     } catch (err) {
       send("error", { message: err.message || "Falha ao buscar e-mails." });
     } finally {
@@ -449,9 +486,15 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
       return res.end();
     }
     const concurrency =
-      parseInt(req.query.conc, 10) || parseInt(process.env.SOCIAL_CONCURRENCY, 10) || 6;
+      parseInt(req.query.conc, 10) || parseInt(process.env.SOCIAL_CONCURRENCY, 10) || 20;
     const engine = resolveEngine(req);
-    const es = engine.name === "playwright" ? emailScraper : new EmailScraper({ engine });
+    // Cascata de 3 níveis (ver enrichSocials): fetch nativo → anti-ban (engine
+    // HTTP, só sites bloqueados) → navegador.
+    const es = emailScraper;
+    const engineScraper =
+      engine.name !== "playwright" ? new EmailScraper({ engine, engineMode: "fast" }) : null;
+    const engineConcurrency =
+      parseInt(req.query.econc, 10) || parseInt(process.env.EMAIL_ENGINE_CONCURRENCY, 10) || 4;
     // Fallback com navegador (sites JS): ligado por padrão, desligável com render=0.
     const useBrowser = req.query.render !== "0" && typeof makeBrowserEmailScraper === "function";
     const browserScraper = useBrowser
@@ -467,18 +510,19 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
     let semRedes = 0;
     let falhas = 0;
     let viaBusca = 0;
+    let antiBan = 0;
     const sendProgress = (p, query) =>
       send("progress", { fase: p.fase, current: p.current, total: p.total, nome: p.nome, encontrados: p.encontrados, query });
     try {
       for (const b of item.buscas) {
         const r = await enrichSocials(
           { comSite: b.comSite, semSite: b.semSite },
-          { emailScraper: es, browserScraper, socialSearchScraper: useSearch ? socialSearchScraper : null },
+          { emailScraper: es, engineScraper, browserScraper, socialSearchScraper: useSearch ? socialSearchScraper : null },
           (p) => {
             if (p.erro) console.warn(`[socials] "${p.nome}": ${p.erro}`);
             sendProgress(p, b.query);
           },
-          { concurrency, browserConcurrency, pageCache: cache.page, searchCache: cache.search }
+          { concurrency, engineConcurrency, browserConcurrency, pageCache: cache.page, searchCache: cache.search }
         );
         b.comSite = r.comSite;
         b.semSite = r.semSite;
@@ -486,6 +530,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
         semRedes += r.semRedes;
         falhas += r.falhas;
         viaBusca += r.viaBusca;
+        antiBan += r.antiBan;
       }
       item.ts = Date.now();
       send("done", {
@@ -493,6 +538,7 @@ export function createServer({ scraper, gridScraper, siteTextScraper, emailScrap
         semRedes,
         falhas,
         viaBusca,
+        antiBan,
         comSitePerBusca: item.buscas.map((b) => b.comSite),
         semSitePerBusca: item.buscas.map((b) => b.semSite),
       });

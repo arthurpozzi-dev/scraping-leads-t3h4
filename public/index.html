@@ -142,8 +142,8 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
               <input id="key" type="password" placeholder="AIza..." autocomplete="off" />
             </div>
             <div style="flex: 0 0 160px;">
-              <label for="conc">Análises em paralelo<span class="help tip-end" tabindex="0" role="note" aria-label="Quantos sites são analisados ao mesmo tempo no enriquecimento de Core Web Vitals. Maior é mais rápido, mas acima de cerca de 15 pode bater no limite da API." data-tip="Quantos sites são analisados ao mesmo tempo no enriquecimento CWV. Maior = mais rápido, mas acima de ~15 pode bater no limite da API."></span></label>
-              <input id="conc" type="number" min="1" max="20" value="12" />
+              <label for="conc">Análises em paralelo<span class="help tip-end" tabindex="0" role="note" aria-label="Quantos sites são analisados ao mesmo tempo. Vazio = automático: a API do Google roda ~24 em paralelo e o self-hosted limita à metade dos núcleos. Preencha só para forçar um valor." data-tip="Vazio = automático (API ~24, self-hosted = núcleos÷2). Preencha só para forçar um número específico."></span></label>
+              <input id="conc" type="number" min="1" max="40" placeholder="auto" />
             </div>
           </div>
 
@@ -162,6 +162,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
                 <span>
                   <span class="t-title">Self-Hosted do Sistema</span>
                   <span class="t-desc">Usa a frota Lighthouse do servidor (LIGHTHOUSE_SERVER_URL).</span>
+                  <span class="t-desc" style="color: #b45309; font-weight: 600;">⚠ Só usar caso a API esteja off — roda na CPU local, é mais lento.</span>
                 </span>
               </label>
               <label class="toggle-card">
@@ -242,6 +243,15 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       </div>
 
       <div class="toolbar">
+        <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-start;">
+          <button id="enrichAll" class="btn btn-primary">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>
+            Enriquecimento completo
+          </button>
+          <label class="check" style="font-size: .8em;" title="Ao terminar o enriquecimento completo, baixa o .zip nas configurações padrão e envia uma notificação do navegador.">
+            <input type="checkbox" id="autoExport" /> Baixar export + notificar ao terminar
+          </label>
+        </div>
         <button id="enrich" class="btn">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           Enriquecer sites (CWV)
@@ -266,6 +276,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
       </div>
       <div class="status" id="enrichStatus"></div>
       <div class="bar" id="enrichBar"><i id="enrichFill"></i></div>
+      <div id="enrichTimer" aria-live="polite" style="font-variant-numeric: tabular-nums; opacity: .7; font-size: .85em; margin-top: 4px;"></div>
 
       <!-- Resumo global: soma de todas as buscas (só aparece com mais de uma) -->
       <div id="summaryGlobalWrap" style="display:none;">
@@ -357,14 +368,14 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
           <legend>Relatórios dos sites</legend>
           <select id="ex-reports">
             <option value="none">Não incluir</option>
-            <option value="html" selected>HTML</option>
-            <option value="pdf">PDF</option>
+            <option value="html">HTML</option>
+            <option value="pdf" selected>PDF</option>
             <option value="both">HTML + PDF</option>
           </select>
           <label for="ex-lang" style="margin:12px 0 6px;">Idioma do relatório</label>
           <select id="ex-lang">
-            <option value="pt-BR" selected>Português (Brasil)</option>
-            <option value="en-US">English (US)</option>
+            <option value="pt-BR">Português (Brasil)</option>
+            <option value="en-US" selected>English (US)</option>
             <option value="pt-PT">Português (Portugal)</option>
             <option value="es">Español</option>
             <option value="de-DE">Deutsch</option>

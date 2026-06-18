@@ -48,3 +48,41 @@ function createMemo() {
 export function createJobCache() {
   return { page: createMemo(), search: createMemo(), cwv: createMemo() };
 }
+
+/**
+ * Cache de CWV PERSISTENTE entre jobs, por domínio, com TTL. Diferente do memo
+ * por job (que só dedup chamadas em voo dentro de uma execução), este RETÉM o
+ * valor resolvido por `ttlMs` — CWV varia devagar, então reanalisar o mesmo
+ * domínio em minutos/horas é desperdício (cada análise de laboratório custa
+ * ~20s). Combina o dedup de promessas em voo com a retenção do resultado.
+ *
+ * A chave já deve embutir o que muda o resultado (deep/fast, estratégia) — ver
+ * EnrichLeads. Rejeição NÃO fica cacheada (evicta para permitir retry depois).
+ *
+ * @param {{ ttlMs?: number, now?: () => number }} [opts]
+ */
+export function createCwvCache({ ttlMs = 6 * 3600_000, now = () => Date.now() } = {}) {
+  const inflight = new Map();
+  const resolved = new Map(); // key -> { value, at }
+  return {
+    run(key, factory) {
+      const k = key || "";
+      const hit = resolved.get(k);
+      if (hit && now() - hit.at < ttlMs) return Promise.resolve(hit.value);
+      if (inflight.has(k)) return inflight.get(k);
+      const p = Promise.resolve()
+        .then(factory)
+        .then((value) => {
+          resolved.set(k, { value, at: now() });
+          inflight.delete(k);
+          return value;
+        })
+        .catch((e) => {
+          inflight.delete(k);
+          throw e;
+        });
+      inflight.set(k, p);
+      return p;
+    },
+  };
+}

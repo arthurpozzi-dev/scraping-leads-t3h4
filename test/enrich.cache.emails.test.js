@@ -3,6 +3,38 @@ import assert from "node:assert/strict";
 import { enrichEmails } from "../src/application/enrichEmails.js";
 import { createJobCache } from "../src/application/jobCache.js";
 
+test("anti-ban tier retries ONLY sites the native fetch could not load", async () => {
+  const nativeCalls = [];
+  const engineCalls = [];
+  const emailScraper = {
+    async scrapeContacts(url) {
+      nativeCalls.push(url);
+      if (url.includes("blocked")) throw new Error("HTTP 403"); // Cloudflare-ish
+      return { emails: ["ok@ok.com"], socials: [], pagesVisited: 1 };
+    },
+  };
+  const engineScraper = {
+    async scrapeContacts(url) {
+      engineCalls.push(url);
+      return { emails: ["unblocked@blocked.com"], socials: [], pagesVisited: 1 };
+    },
+  };
+  const leads = [
+    { nome: "Ok", site: "https://ok.com", site_emails: "" },
+    { nome: "Blocked", site: "https://blocked.com", site_emails: "" },
+  ];
+  const out = await enrichEmails(leads, emailScraper, undefined, { engineScraper });
+
+  // Tier 2 só toca o site bloqueado, não o que já carregou.
+  assert.deepEqual(engineCalls, ["https://blocked.com"]);
+  assert.equal(out.antiBan, 1);
+  assert.equal(out.ok, 2);
+  assert.equal(out.falhas, 0);
+  const blocked = out.leads.find((l) => l.nome === "Blocked");
+  assert.equal(blocked.site_emails, "unblocked@blocked.com");
+  assert.equal(blocked.site_emails_erro, ""); // erro do fetch nativo foi limpo
+});
+
 test("pageCache fetches a shared site once across leads", async () => {
   const calls = new Map();
   const emailScraper = {

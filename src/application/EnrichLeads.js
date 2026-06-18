@@ -115,8 +115,11 @@ export async function enrichLeads(comSite = [], pageSpeedClient, onProgress, opt
       // 1+2) Resolve campo (CrUX) ou laboratório (Lighthouse), com dedup por domínio.
       let resolved;
       try {
+        // A chave embute o modo: um relatório "fast" (CrUX+performance) não pode
+        // ser servido a um job "deep" (4 categorias) do MESMO domínio, e vice-versa.
+        const key = `${deep ? "deep" : "fast"}:${cacheKey(lead.site)}`;
         resolved = cwvCache
-          ? await cwvCache.run(cacheKey(lead.site), () => resolveCwv(lead.site))
+          ? await cwvCache.run(key, () => resolveCwv(lead.site))
           : await resolveCwv(lead.site);
       } catch (e) {
         falhas++;

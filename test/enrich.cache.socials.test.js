@@ -24,6 +24,35 @@ test("searchCache runs identical web searches once across leads", async () => {
   assert.equal(out.viaBusca, 2);   // both leads still receive the profile
 });
 
+test("anti-ban tier retries ONLY sites the native fetch could not load", async () => {
+  const engineCalls = [];
+  const emailScraper = {
+    async scrapeContacts(url) {
+      if (url.includes("blocked")) throw new Error("HTTP 403");
+      return { socials: ["https://instagram.com/ok"] };
+    },
+  };
+  const engineScraper = {
+    async scrapeContacts(url) {
+      engineCalls.push(url);
+      return { socials: ["https://instagram.com/unblocked"] };
+    },
+  };
+  const comSite = [
+    { nome: "Ok", site: "https://ok.com", redes_sociais: "" },
+    { nome: "Blocked", site: "https://blocked.com", redes_sociais: "" },
+  ];
+  const out = await enrichSocials({ comSite, semSite: [] }, { emailScraper, engineScraper });
+
+  assert.deepEqual(engineCalls, ["https://blocked.com"]); // não re-toca o que carregou
+  assert.equal(out.antiBan, 1);
+  assert.equal(out.ok, 2);
+  assert.equal(out.falhas, 0);
+  const blocked = out.comSite.find((l) => l.nome === "Blocked");
+  assert.equal(blocked.redes_sociais, "https://instagram.com/unblocked");
+  assert.equal(blocked.redes_sociais_erro, "");
+});
+
 test("pageCache fetches a shared site once in the site phase", async () => {
   const calls = new Map();
   const emailScraper = {

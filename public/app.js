@@ -9,6 +9,17 @@
  */
 const $ = (id) => document.getElementById(id);
 
+/**
+ * Anexa `conc` SÓ quando o usuário definiu um valor explícito no campo
+ * "Análises em paralelo". Vazio = "auto": o servidor decide pela fonte
+ * (API do Google ~24 / self-hosted = núcleos÷2) e pelo tipo de job.
+ */
+function addConc(params) {
+  const v = parseInt($("conc")?.value, 10);
+  if (Number.isFinite(v) && v > 0) params.set("conc", String(v));
+  return params;
+}
+
 /** Anexa o engine escolhido (e o modo Scrapling) aos params de uma requisição. */
 function addEngine(params) {
   const engine = $("engine")?.value || "playwright";
@@ -53,7 +64,7 @@ let scrapeES = null;
 let jobES = null; // SSE de enrich/sitetext (compartilham a barra)
 
 // Botões de job (compartilham a barra de progresso de enriquecimento).
-const JOB_BTNS = ["enrich", "sitetext", "emailScrape", "socialScrape"];
+const JOB_BTNS = ["enrichAll", "enrich", "sitetext", "emailScrape", "socialScrape"];
 const setJobBtns = (disabled) => JOB_BTNS.forEach((id) => ($(id).disabled = disabled));
 
 const setStatus = (msg) => ($("status").textContent = msg);
@@ -235,6 +246,11 @@ function summaryItems(buscas) {
   const comEmail = com.filter((l) => nonEmpty(l.site_emails)).length;
   const totalEmails = com.reduce((s, l) => s + emailsDe(l).length, 0);
   const comTexto = com.filter((l) => nonEmpty(l.site_texto)).length;
+  // Redes sociais: contam em qualquer lista (com ou sem site).
+  const comRedes = [...com, ...sem].filter((l) => nonEmpty(l.redes_sociais)).length;
+  // "Medido" = medição de performance bem-sucedida (BOM/MÉDIO/RUIM). O resto
+  // (fora do ar, sem dados, ainda sem status) entra em "não medido".
+  const medidos = countStatus("BOM") + countStatus("MÉDIO") + countStatus("RUIM");
   const enriquecidos = com.some((l) => nonEmpty(l.cwv_status));
   const emailsRodou = com.some((l) => nonEmpty(l.site_emails) || nonEmpty(l.site_emails_erro));
   const textoRodou = com.some((l) => nonEmpty(l.site_texto) || nonEmpty(l.site_texto_erro));
@@ -246,15 +262,13 @@ function summaryItems(buscas) {
     ["Após filtro", hasStat("filtrados") ? sumStat("filtrados") : "—"],
     ["Com site", com.length],
     ["Sem site", sem.length],
+    ["Redes sociais", comRedes],
   ];
-  // Performance (só depois de enriquecer os sites).
+  // Performance (só depois de enriquecer os sites): resumido em medido / não medido.
   if (enriquecidos) {
     items.push(
-      ["Perf. boa", countStatus("BOM")],
-      ["Perf. média", countStatus("MÉDIO")],
-      ["Perf. ruim", countStatus("RUIM")],
-      ["Fora do ar", countStatus("FORA DO AR")],
-      ["Sem dados", countStatus("N/A")]
+      ["Sites medidos", medidos],
+      ["Sites não medidos", com.length - medidos]
     );
   }
   // E-mails (só depois de enriquecer e-mails).
@@ -392,10 +406,51 @@ function start() {
 }
 
 // ---- Job SSE genérico (enrich / sitetext) --------------------------------
-function runJob(url, { startMsg, progressMsg, doneMsg }) {
+// ---- Cronômetro do enriquecimento ----------------------------------------
+let jobClock = null;   // id do setInterval (1s)
+let jobOpStart = 0;    // início da OPERAÇÃO atual (uma etapa) — base da ETA
+let chainStart = 0;    // início da CADEIA (enriquecimento completo); 0 = etapa avulsa
+let jobEta = { current: 0, total: 0 };
+
+/** Formata milissegundos como m:ss. */
+function fmtDur(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** Renderiza "⏱ decorrido · restam ~ETA" no elemento do timer. */
+function renderTimer() {
+  const elapsed = Date.now() - (chainStart || jobOpStart);
+  let txt = `⏱ ${fmtDur(elapsed)}`;
+  if (jobEta.total && jobEta.current) {
+    const restam = ((Date.now() - jobOpStart) / jobEta.current) * (jobEta.total - jobEta.current);
+    if (restam > 0) txt += ` · restam ~${fmtDur(restam)}`;
+  }
+  $("enrichTimer").textContent = txt;
+}
+
+/** Inicia (ou continua, numa cadeia) o cronômetro da etapa atual. */
+function startJobClock() {
+  jobOpStart = Date.now();
+  jobEta = { current: 0, total: 0 };
+  if (!jobClock) jobClock = setInterval(renderTimer, 1000);
+  renderTimer();
+}
+
+/** Para o cronômetro e fixa o tempo total (da cadeia, se houver). */
+function stopJobClock() {
+  if (jobClock) { clearInterval(jobClock); jobClock = null; }
+  $("enrichTimer").textContent = `⏱ total ${fmtDur(Date.now() - (chainStart || jobOpStart))}`;
+  chainStart = 0;
+}
+
+// onComplete: chamado APÓS o "done" (encadeia o próximo job no modo completo).
+// keepBusy: mantém os botões desabilitados ao terminar (a cadeia ainda continua).
+function runJob(url, { startMsg, progressMsg, doneMsg, onComplete, keepBusy } = {}) {
   if (!state.id) return;
   if (jobES) jobES.close();
   setJobBtns(true);
+  startJobClock();
   $("enrichStatus").textContent = startMsg;
   setBar("enrichBar", "enrichFill", 2);
 
@@ -404,7 +459,11 @@ function runJob(url, { startMsg, progressMsg, doneMsg }) {
   jobES.addEventListener("progress", (e) => {
     const p = JSON.parse(e.data);
     $("enrichStatus").textContent = progressMsg(p);
-    if (p.total) setBar("enrichBar", "enrichFill", Math.round((100 * p.current) / p.total));
+    if (p.total) {
+      setBar("enrichBar", "enrichFill", Math.round((100 * p.current) / p.total));
+      jobEta = { current: p.current, total: p.total };
+      renderTimer();
+    }
   });
 
   jobES.addEventListener("done", (e) => {
@@ -417,33 +476,40 @@ function runJob(url, { startMsg, progressMsg, doneMsg }) {
     renderCurrent();
     $("enrichStatus").textContent = doneMsg(d);
     setBar("enrichBar", "enrichFill", 100);
-    setJobBtns(false);
+    if (!keepBusy) {
+      setJobBtns(false); // na cadeia, o próximo job reassume os botões
+      stopJobClock();    // última etapa: fixa o tempo total
+    } else {
+      jobEta = { current: 0, total: 0 }; // próxima etapa recomeça a ETA; o relógio segue
+    }
     jobES.close();
     setTimeout(() => setBar("enrichBar", "enrichFill", null), 1500);
+    if (typeof onComplete === "function") onComplete(d);
   });
 
   jobES.addEventListener("error", (e) => {
     let msg = "Erro na operação.";
     try { if (e.data) msg = JSON.parse(e.data).message; } catch {}
     $("enrichStatus").textContent = "❌ " + msg;
-    setJobBtns(false);
+    setJobBtns(false); // erro interrompe a cadeia
+    stopJobClock();
     setBar("enrichBar", "enrichFill", null);
     jobES.close();
   });
 }
 
-function enrich() {
+function enrich(onComplete, keepBusy) {
   const deep = $("deepCwv").checked;
   // "Outro servidor" sem URL cairia silenciosamente no Google — bloqueia antes.
   const lhSource = document.querySelector('input[name="lhSource"]:checked')?.value || "google";
   if (lhSource === "custom" && !$("lighthouseUrl").value.trim()) {
     $("enrichStatus").textContent = "❌ Informe a URL da instância Lighthouse (ou troque a fonte da análise).";
+    setJobBtns(false); // interrompe a cadeia se estava no modo completo
+    chainStart = 0;
     return;
   }
-  const params = new URLSearchParams({
-    key: $("key").value.trim(),
-    conc: parseInt($("conc").value, 10) || 12,
-  });
+  const params = new URLSearchParams({ key: $("key").value.trim() });
+  addConc(params);
   if (deep) params.set("deep", "1");
   addLighthouse(params);
   addEngine(params);
@@ -456,11 +522,13 @@ function enrich() {
       if (d.falhas) partes.push(`${d.falhas} sem dados`);
       return `✅ ${partes.join(", ")} (passe o mouse no status para o motivo).`;
     },
+    onComplete,
+    keepBusy,
   });
 }
 
 function sitetext() {
-  const params = new URLSearchParams({ conc: parseInt($("conc").value, 10) || 8 });
+  const params = addConc(new URLSearchParams());
   addEngine(params);
   runJob(`/api/sitetext/${state.id}?${params}`, {
     startMsg: "Puxando o texto dos sites...",
@@ -472,29 +540,33 @@ function sitetext() {
   });
 }
 
-function emailScrape() {
-  const params = new URLSearchParams({ conc: parseInt($("conc").value, 10) || 6 });
+function emailScrape(onComplete, keepBusy) {
+  const params = addConc(new URLSearchParams());
   // Fallback com navegador (sites JS): roda só nos leads que ficarem sem e-mail.
   if (!$("renderJs").checked) params.set("render", "0");
   addEngine(params);
   runJob(`/api/emails/${state.id}?${params}`, {
     startMsg: "Buscando e-mails (home + páginas de contato)...",
     progressMsg: (p) => {
-      const rotulo = p.fase === "navegador" ? "Renderizando (sites JS)" : "E-mails";
+      const rotulo =
+        p.fase === "navegador" ? "Renderizando (sites JS)" : p.fase === "anti-ban" ? "Anti-ban (sites bloqueados)" : "E-mails";
       return `${rotulo} ${p.current}/${p.total}: ${p.nome}` + (p.encontrados ? ` (${p.encontrados})` : "");
     },
     doneMsg: (d) => {
       const partes = [`${d.ok} com e-mail`];
+      if (d.antiBan) partes.push(`${d.antiBan} via anti-ban`);
       if (d.renderizados) partes.push(`${d.renderizados} via navegador`);
       if (d.semEmail) partes.push(`${d.semEmail} sem e-mail`);
       if (d.falhas) partes.push(`${d.falhas} falharam`);
       return `✅ ${partes.join(", ")} (veja a coluna E-mails).`;
     },
+    onComplete,
+    keepBusy,
   });
 }
 
-function socialScrape() {
-  const params = new URLSearchParams({ conc: parseInt($("conc").value, 10) || 6 });
+function socialScrape(onComplete, keepBusy) {
+  const params = addConc(new URLSearchParams());
   // Fallback com navegador (sites JS) e busca web (descoberta) — opcionais.
   if (!$("renderJs").checked) params.set("render", "0");
   if ($("searchSocials").checked) params.set("search", "1");
@@ -503,17 +575,58 @@ function socialScrape() {
     startMsg: "Procurando redes sociais (site + páginas de contato)...",
     progressMsg: (p) => {
       const rotulo =
-        p.fase === "navegador" ? "Renderizando (sites JS)" : p.fase === "busca" ? "Buscando na web" : "Redes";
+        p.fase === "navegador"
+          ? "Renderizando (sites JS)"
+          : p.fase === "anti-ban"
+            ? "Anti-ban (sites bloqueados)"
+            : p.fase === "busca"
+              ? "Buscando na web"
+              : "Redes";
       return `${rotulo} ${p.current}/${p.total}: ${p.nome}` + (p.encontrados ? ` (${p.encontrados})` : "");
     },
     doneMsg: (d) => {
       const partes = [`${d.ok} com rede social`];
+      if (d.antiBan) partes.push(`${d.antiBan} via anti-ban`);
       if (d.viaBusca) partes.push(`${d.viaBusca} via busca web`);
       if (d.semRedes) partes.push(`${d.semRedes} sem rede`);
       if (d.falhas) partes.push(`${d.falhas} falharam`);
       return `✅ ${partes.join(", ")} (veja a coluna Redes).`;
     },
+    onComplete,
+    keepBusy,
   });
+}
+
+/**
+ * Enriquecimento completo: roda CWV → e-mails → redes sociais em SEQUÊNCIA,
+ * cada etapa esperando a anterior. `keepBusy` mantém os botões travados entre
+ * as etapas; a última (redes) reassume o estado normal ao terminar. Um erro em
+ * qualquer etapa interrompe a cadeia (o onComplete só dispara no "done").
+ */
+function enrichComplete() {
+  if (!state.id) return;
+  chainStart = Date.now(); // cronômetro cobre a cadeia inteira (CWV + e-mails + redes)
+  // A última etapa (redes) dispara o pós-processamento: export automático + aviso.
+  enrich(() => emailScrape(() => socialScrape(afterEnrichComplete), true), true);
+}
+
+/** Notificação do navegador (silenciosa se o usuário não concedeu permissão). */
+function notify(title, body) {
+  try {
+    if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body });
+  } catch { /* alguns navegadores bloqueiam Notification fora de contexto seguro */ }
+}
+
+/** Ao fim do enriquecimento completo: se o usuário optou, baixa o .zip e notifica. */
+async function afterEnrichComplete() {
+  if (!$("autoExport")?.checked) return;
+  try {
+    const name = await downloadExportZip(defaultExportConfig());
+    $("enrichStatus").textContent += `  ·  ⬇ ${name}`;
+    notify("Enriquecimento concluído", `Exportação ${name} baixada.`);
+  } catch (e) {
+    $("enrichStatus").textContent = "❌ Export automático falhou: " + e.message;
+  }
 }
 
 // ---- Abas, seletor e downloads -------------------------------------------
@@ -601,8 +714,8 @@ function refreshExportCounts() {
 async function openExportModal() {
   if (!state.id) return;
   await ensureExportCols();
-  // Abrangência: só mostra "todas" quando há mais de uma busca.
-  $("ex-combined").checked = false;
+  // Abrangência: por padrão junta todas as listas numa planilha só.
+  $("ex-combined").checked = true;
   $("ex-scope").disabled = false;
   $("ex-scope").value = state.buscas.length > 1 ? "all" : "current";
   refreshExportCounts();
@@ -639,6 +752,52 @@ function exportConfig() {
   };
 }
 
+/** POSTa a config de exportação e dispara o download do .zip. Devolve o nome do arquivo. */
+async function downloadExportZip(cfg) {
+  const res = await fetch(`/api/export/${state.id}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cfg),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.message || `Erro ${res.status}`);
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") || "";
+  const name = (cd.match(/filename="([^"]+)"/) || [])[1] || "leads-export.zip";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return name;
+}
+
+/**
+ * Config de exportação PADRÃO, independente do modal estar aberto: junta tudo
+ * numa planilha só, XLSX, todas as colunas/listas. Relatório e idioma seguem o
+ * que estiver selecionado no modal (PDF/English por padrão). `columns: null` e
+ * `statuses: []` => o servidor usa todas as colunas e sem filtro de status.
+ */
+function defaultExportConfig() {
+  return {
+    scope: "all",
+    lists: ["com-site", "sem-site"],
+    formats: ["xlsx"],
+    reports: $("ex-reports").value || "pdf",
+    locale: $("ex-lang").value || "en-US",
+    onlyWithEmail: false,
+    oneEmailPerRow: false,
+    combined: true,
+    statuses: [],
+    columns: null,
+  };
+}
+
 async function runExport() {
   const cfg = exportConfig();
   if (!cfg.lists.length && cfg.reports === "none")
@@ -650,26 +809,7 @@ async function runExport() {
   $("ex-status").textContent =
     cfg.reports === "pdf" || cfg.reports === "both" ? "Gerando (PDF é mais lento)…" : "Gerando…";
   try {
-    const res = await fetch(`/api/export/${state.id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(cfg),
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      throw new Error(j.message || `Erro ${res.status}`);
-    }
-    const blob = await res.blob();
-    const cd = res.headers.get("Content-Disposition") || "";
-    const name = (cd.match(/filename="([^"]+)"/) || [])[1] || "leads-export.zip";
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    await downloadExportZip(cfg);
     closeExportModal();
   } catch (e) {
     $("ex-status").textContent = "❌ " + e.message;
@@ -786,6 +926,12 @@ fetch("/api/config")
   .catch(() => syncLhSource());
 
 $("go").addEventListener("click", start);
+$("enrichAll").addEventListener("click", enrichComplete);
+// Ao optar pelo aviso, já pede permissão de notificação (melhor momento p/ o prompt).
+$("autoExport").addEventListener("change", (e) => {
+  if (e.target.checked && "Notification" in window && Notification.permission === "default")
+    Notification.requestPermission();
+});
 $("enrich").addEventListener("click", enrich);
 $("sitetext").addEventListener("click", sitetext);
 $("emailScrape").addEventListener("click", emailScrape);

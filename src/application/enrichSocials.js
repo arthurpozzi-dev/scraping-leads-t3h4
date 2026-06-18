@@ -5,8 +5,10 @@
  * confiável para a mais cara e incerta — sempre MESCLANDO com o que o lead já
  * tinha (do Google Maps), nunca perdendo links:
  *
- *   Fase 1 — SITE (fetch, lista "com site"): extrai os perfis sociais do HTML do
- *            próprio site (home + páginas de contato), via `emailScraper`.
+ *   Fase 1 — SITE (fetch nativo, lista "com site"): extrai os perfis sociais do
+ *            HTML do próprio site (home + páginas de contato), via `emailScraper`.
+ *   Fase 1.5 — ANTI-BAN (opcional): re-tenta SÓ os sites que BLOQUEARAM o fetch
+ *            nativo, via engine em modo HTTP (Scrapling fast), via `engineScraper`.
  *   Fase 2 — NAVEGADOR (opcional, lista "com site"): renderiza num browser real os
  *            sites que ficaram sem rede (sites 100% JavaScript), via `browserScraper`.
  *   Fase 3 — BUSCA WEB (opcional, qualquer lista): para quem ficou sem rede — com
@@ -19,7 +21,8 @@ import { runPool } from "./concurrentPool.js";
 import { cacheKey } from "./jobCache.js";
 import { buildQueryTerms } from "../infrastructure/scraper/SocialSearchScraper.js";
 
-const DEFAULT_CONCURRENCY = 6;
+const DEFAULT_CONCURRENCY = 20; // fetch nativo: I/O puro, escala bem
+const DEFAULT_ENGINE_CONCURRENCY = 4;
 const DEFAULT_BROWSER_CONCURRENCY = 2;
 const DEFAULT_SEARCH_CONCURRENCY = 2;
 
@@ -28,13 +31,13 @@ const socialCount = (lead) => (lead.redes_sociais || "").split(" | ").filter(Boo
 
 /**
  * @param {{ comSite?: import("../domain/Lead.js").Lead[], semSite?: import("../domain/Lead.js").Lead[] }} busca
- * @param {{ emailScraper:{scrapeContacts:(url:string)=>Promise<{socials:string[]}>}, browserScraper?:{scrapeContacts:(url:string)=>Promise<{socials:string[]}>}, socialSearchScraper?:{search:(lead:any)=>Promise<string[]>} }} scrapers
- * @param {(p: { fase:"sites"|"navegador"|"busca", current:number, total:number, nome:string, encontrados:number, erro?:string }) => void} [onProgress]
- * @param {{ concurrency?: number, browserConcurrency?: number, searchConcurrency?: number }} [options]
- * @returns {Promise<{ comSite: any[], semSite: any[], ok: number, semRedes: number, viaBusca: number, falhas: number }>}
+ * @param {{ emailScraper:{scrapeContacts:(url:string)=>Promise<{socials:string[]}>}, engineScraper?:{scrapeContacts:(url:string)=>Promise<{socials:string[]}>}, browserScraper?:{scrapeContacts:(url:string)=>Promise<{socials:string[]}>}, socialSearchScraper?:{search:(lead:any)=>Promise<string[]>} }} scrapers
+ * @param {(p: { fase:"sites"|"anti-ban"|"navegador"|"busca", current:number, total:number, nome:string, encontrados:number, erro?:string }) => void} [onProgress]
+ * @param {{ concurrency?: number, engineConcurrency?: number, browserConcurrency?: number, searchConcurrency?: number }} [options]
+ * @returns {Promise<{ comSite: any[], semSite: any[], ok: number, semRedes: number, viaBusca: number, falhas: number, antiBan: number }>}
  */
 export async function enrichSocials(busca = {}, scrapers = {}, onProgress, options = {}) {
-  const { emailScraper, browserScraper, socialSearchScraper } = scrapers;
+  const { emailScraper, engineScraper, browserScraper, socialSearchScraper } = scrapers;
   const comSite = [...(busca.comSite || [])];
   const semSite = [...(busca.semSite || [])];
 
@@ -65,6 +68,37 @@ export async function enrichSocials(busca = {}, scrapers = {}, onProgress, optio
     onDone: (d, t, lead, result) =>
       onProgress?.({ fase: "sites", current: ++done, total, nome: lead.nome, encontrados: socialCount(result), erro: result.redes_sociais_erro || undefined }),
   });
+
+  // ---- Fase 1.5: re-tentativa ANTI-BAN (engine HTTP) p/ quem NÃO carregou ----
+  // Mesma cascata do e-mail: só re-tenta os sites que BLOQUEARAM o fetch nativo,
+  // via engine em modo HTTP (Scrapling fast) — sem navegador, barato e paralelo.
+  let antiBan = 0;
+  if (engineScraper) {
+    const bloqueados = com1.map((lead, i) => ({ lead, i })).filter(({ lead }) => lead.redes_sociais_erro);
+    if (bloqueados.length) {
+      const eTotal = bloqueados.length;
+      let eDone = 0;
+      const scrapeViaEngine = (url) =>
+        pageCache ? pageCache.run("eng:" + cacheKey(url), () => engineScraper.scrapeContacts(url)) : engineScraper.scrapeContacts(url);
+      await runPool(bloqueados, {
+        concurrency: options.engineConcurrency || DEFAULT_ENGINE_CONCURRENCY,
+        task: async ({ lead, i }) => {
+          try {
+            const { socials } = await scrapeViaEngine(lead.site);
+            const antes = lead.redes_sociais || "";
+            const merged = mergeSocialLinks(antes, socials);
+            if (merged !== antes) antiBan++;
+            // Engine alcançou o site: limpa o erro do fetch nativo (com rede ou não).
+            com1[i] = { ...lead, redes_sociais: merged, redes_fontes: recordSocialSources(lead.redes_fontes, antes, merged, "site"), redes_sociais_erro: "" };
+          } catch {
+            /* engine também não alcançou: mantém o erro (tenta navegador/busca) */
+          }
+        },
+        onDone: (d, t, { i }) =>
+          onProgress?.({ fase: "anti-ban", current: ++eDone, total: eTotal, nome: com1[i].nome, encontrados: socialCount(com1[i]) }),
+      });
+    }
+  }
 
   // ---- Fase 2: fallback com navegador (sites JS que ficaram sem rede) ------
   if (browserScraper) {
@@ -146,5 +180,5 @@ export async function enrichSocials(busca = {}, scrapers = {}, onProgress, optio
     else semRedes++;
   }
 
-  return { comSite: outCom, semSite: outSem, ok, semRedes, viaBusca, falhas };
+  return { comSite: outCom, semSite: outSem, ok, semRedes, viaBusca, falhas, antiBan };
 }

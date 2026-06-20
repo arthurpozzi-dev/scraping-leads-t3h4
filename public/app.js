@@ -130,7 +130,7 @@ function renderCell(value, type, row) {
 function openSalesReport(index) {
   if (!state.id || index === "") return;
   const params = addLighthouse(new URLSearchParams());
-  window.open(`/api/report/${state.id}/lead/${state.current}/${index}.html?${params}`, "_blank", "noopener");
+  window.open(`api/report/${state.id}/lead/${state.current}/${index}.html?${params}`, "_blank", "noopener");
 }
 window.openSalesReport = openSalesReport;
 
@@ -359,7 +359,7 @@ function start() {
     params.set("step", $("cityStep").value || "0.04");
   }
   addEngine(params);
-  scrapeES = new EventSource(`/api/scrape?${params}`);
+  scrapeES = new EventSource(`api/scrape?${params}`);
 
   scrapeES.addEventListener("progress", (e) => {
     const p = JSON.parse(e.data);
@@ -502,7 +502,7 @@ function enrich(onComplete, keepBusy) {
   if (deep) params.set("deep", "1");
   addLighthouse(params);
   addEngine(params);
-  runJob(`/api/enrich/${state.id}?${params}`, {
+  runJob(`api/enrich/${state.id}?${params}`, {
     startMsg: deep ? "Analisando sites (Lighthouse completo)..." : "Analisando sites (modo rápido: CrUX + performance)...",
     progressMsg: (p) => `${p.status === "FORA DO AR" ? "Fora do ar" : "PageSpeed"} ${p.current}/${p.total}: ${p.nome}`,
     doneMsg: (d) => {
@@ -519,7 +519,7 @@ function enrich(onComplete, keepBusy) {
 function sitetext() {
   const params = addConc(new URLSearchParams());
   addEngine(params);
-  runJob(`/api/sitetext/${state.id}?${params}`, {
+  runJob(`api/sitetext/${state.id}?${params}`, {
     startMsg: "Puxando o texto dos sites...",
     progressMsg: (p) => `Texto ${p.current}/${p.total}: ${p.nome}`,
     doneMsg: (d) =>
@@ -534,7 +534,7 @@ function emailScrape(onComplete, keepBusy) {
   // Fallback com navegador (sites JS): roda só nos leads que ficarem sem e-mail.
   if (!$("renderJs").checked) params.set("render", "0");
   addEngine(params);
-  runJob(`/api/emails/${state.id}?${params}`, {
+  runJob(`api/emails/${state.id}?${params}`, {
     startMsg: "Buscando e-mails (home + páginas de contato)...",
     progressMsg: (p) => {
       const rotulo =
@@ -560,7 +560,7 @@ function socialScrape(onComplete, keepBusy) {
   if (!$("renderJs").checked) params.set("render", "0");
   if ($("searchSocials").checked) params.set("search", "1");
   addEngine(params);
-  runJob(`/api/socials/${state.id}?${params}`, {
+  runJob(`api/socials/${state.id}?${params}`, {
     startMsg: "Procurando redes sociais (site + páginas de contato)...",
     progressMsg: (p) => {
       const rotulo =
@@ -634,7 +634,7 @@ function setupDownloads() {
   document.querySelectorAll("[data-dl]").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (!state.id) return;
-      location.href = `/api/download/${state.id}/${state.current}/${btn.dataset.dl}.${btn.dataset.ext}`;
+      location.href = `api/download/${state.id}/${state.current}/${btn.dataset.dl}.${btn.dataset.ext}`;
     });
   });
 }
@@ -655,7 +655,7 @@ function renderColCheckboxes(containerId, cols) {
 /** Garante que as colunas foram buscadas do servidor e os checkboxes montados. */
 async function ensureExportCols() {
   if (exportCols) return;
-  const res = await fetch("/api/columns");
+  const res = await fetch("api/columns");
   exportCols = await res.json();
   renderColCheckboxes("ex-cols-com", exportCols["com-site"]);
   renderColCheckboxes("ex-cols-sem", exportCols["sem-site"]);
@@ -743,7 +743,7 @@ function exportConfig() {
 
 /** POSTa a config de exportação e dispara o download do .zip. Devolve o nome do arquivo. */
 async function downloadExportZip(cfg) {
-  const res = await fetch(`/api/export/${state.id}`, {
+  const res = await fetch(`api/export/${state.id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(cfg),

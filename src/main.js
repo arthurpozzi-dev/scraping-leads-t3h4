@@ -29,6 +29,9 @@ try {
 }
 
 const PORT = process.env.PORT || 3000;
+// Interface de escuta. Default 127.0.0.1: atrás de um reverse proxy (Nginx/CloudPanel)
+// o app não deve ficar exposto direto na internet. Use HOST=0.0.0.0 para LAN/dev.
+const HOST = process.env.HOST || "127.0.0.1";
 
 // Registry de engines de scraping (playwright | cloakbrowser | scrapling).
 // O servidor resolve o engine por requisição a partir do parâmetro `engine`.
@@ -72,8 +75,8 @@ const app = createServer({
   lighthouseFleet,
 });
 
-app.listen(PORT, () => {
-  console.log(`\n  Maps Leads Scraper · T3H4 rodando em: http://localhost:${PORT}\n`);
+app.listen(PORT, HOST, () => {
+  console.log(`\n  Maps Leads Scraper · T3H4 rodando em: http://${HOST}:${PORT}\n`);
 });
 
 // Encerra engines (mata o sidecar Scrapling, fecha browsers) ao desligar.

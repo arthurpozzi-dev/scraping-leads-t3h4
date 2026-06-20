@@ -151,6 +151,61 @@ Comandos úteis: `pm2 logs maps-leads`, `pm2 restart maps-leads`, `pm2 status`.
 
 ---
 
+## 4.1 Reverse proxy sob a subpasta `/scraping` (vhost do CloudPanel)
+
+O app fica em `t3h4.com.br/scraping`. Como o front usa caminhos **relativos**, basta
+o Nginx (1) forçar a barra final e (2) fazer proxy de `/scraping/` para o backend
+**removendo o prefixo** (`proxy_pass` com `/` no fim).
+
+No CloudPanel: **Sites → t3h4.com.br → Vhost** e adicione, dentro do `server { }`
+e **acima** do `location /` principal:
+
+```nginx
+# Scraper (Node em 127.0.0.1:3000) sob /scraping
+location = /scraping { return 301 /scraping/; }
+
+location /scraping/ {
+    # Basic Auth só para o scraper (ver §4.2). Remova estas 2 linhas se usar o
+    # Basic Auth nativo do CloudPanel (que protege o site inteiro).
+    auth_basic "Scraper restrito";
+    auth_basic_user_file /home/t3h4/htdocs/t3h4.com.br/.htpasswd-scraping;
+
+    proxy_pass http://127.0.0.1:3000/;   # a barra final remove o prefixo /scraping
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # SSE: o app transmite progresso em tempo real (EventSource). Sem isto o
+    # buffering segura os eventos e a barra de progresso "congela".
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+```
+
+Salve e o CloudPanel recarrega o Nginx. Teste: `https://t3h4.com.br/scraping/`.
+
+## 4.2 Basic Auth (proteger o scraper)
+
+Duas opções:
+- **Nativo do CloudPanel (mais fácil):** Site → **Security → Basic Auth**. Protege o
+  site **inteiro** (inclui /scraping). Se o domínio é só seu, é o caminho simples —
+  e aí remova as 2 linhas `auth_basic*` do bloco acima.
+- **Só na subpasta:** mantenha as `auth_basic*` do bloco e crie o arquivo de senha
+  (como `cloud-deploy`, sem root):
+  ```bash
+  printf "admin:$(openssl passwd -apr1 'SUA_SENHA')\n" \
+    > /home/t3h4/htdocs/t3h4.com.br/.htpasswd-scraping
+  chmod 644 /home/t3h4/htdocs/t3h4.com.br/.htpasswd-scraping
+  ```
+
+> **DNS:** para `t3h4.com.br` resolver na VPS, aponte um registro **A** do domínio
+> para `2.24.201.99`. Sem isso, a subpasta só responde localmente (túnel/IP).
+
 ## 5. Atualizações futuras (deploy de nova versão)
 ```bash
 sudo su - SITE_USER

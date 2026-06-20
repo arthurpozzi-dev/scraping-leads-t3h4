@@ -57,7 +57,7 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
           <select id="engine">
             <option value="playwright">Playwright (padrão)</option>
             <option value="cloakbrowser">CloakBrowser (anti-ban / Cloudflare)</option>
-            <option value="scrapling">Scrapling (rápido / stealth)</option>
+            <option value="scrapling" disabled>Scrapling (rápido / stealth) — requer admin habilitar</option>
           </select>
         </div>
         <div id="scraplingModeWrap" style="flex: 0 0 200px; display:none;">
@@ -70,8 +70,9 @@ https://www.google.com/maps/search/petshops+em+campinas"></textarea>
         </div>
       </div>
       <p class="field-hint" id="engineHint">
-        CloakBrowser e Scrapling exigem instalação (ver README). Scrapling não faz o scroll do Maps —
-        nesse caso a coleta usa Playwright e o Scrapling vale no enriquecimento.
+        Scrapling precisa ser habilitado pelo admin neste servidor (sidecar Python) — por isso está
+        indisponível. Quando ativo, ele não faz o scroll do Maps: a coleta usa Playwright e o Scrapling
+        vale no enriquecimento.
       </p>
       <div id="gridHint" class="field-hint" style="display:none;"></div>
 
